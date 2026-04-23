@@ -135,14 +135,19 @@ def generate_project(task: str):
     prompt = f"""任务：{task}
 
 将完整可运行的项目代码写入目录 {PROJECT_DIR}。
-规则：
-- 网页类 → 单文件 index.html（CSS/JS 全部内嵌）
-- CLI 工具 → main.py 或 main.js
-- 代码必须完整，不省略任何逻辑，可直接运行
-- 不需要解释，直接写文件
 
-写完后输出一行：PROJECT_GENERATED"""
-    call_claude(prompt, tools="Write,Bash,Edit", timeout=600)
+**硬性规则（违反则项目不可测）：**
+1. **网页类必须是单文件 index.html** —— CSS 和 JS 全部内嵌在 `<style>` 和 `<script>` 标签里，**禁止引用任何外部 .js / .css 文件**
+2. 不得引用 {PROJECT_DIR} 目录之外的任何资源
+3. 代码必须完整，可以立即打开/运行，不允许有 TODO 或占位符
+4. CLI 工具写单文件 main.py 或 main.js
+
+**自检（写完后必做）：**
+- 打开 index.html，用 grep 确认没有 `src="xxx.js"` 或 `href="xxx.css"` 这种外部引用
+- 如果有，把对应文件内容合并进来
+
+写完并自检通过后，输出一行：PROJECT_GENERATED"""
+    call_claude(prompt, tools="Write,Bash,Edit,Read", timeout=600)
     add_event("主CC：代码写入完成")
 
 # ── 阶段 1b：分析项目，生成测试计划 ──────────────────────────────────────
@@ -324,17 +329,61 @@ def run_agent(agent: dict, plan: dict, iteration: int) -> dict:
     return report
 
 def _parse_report(path: Path, agent: dict) -> dict:
-    fallback = {"agent": agent["id"], "role": agent["role"],
-                "passed": False, "issues": [], "summary": "报告解析失败"}
-    if not path.exists():
-        return fallback
-    try:
-        return json.loads(path.read_text())
-    except Exception:
-        # 尝试从文件内容中提取 JSON
-        raw = path.read_text()
+    """多策略解析 Agent 报告，文件缺失时从实时状态兜底"""
+    if path.exists():
+        raw = path.read_text(encoding="utf-8").strip()
+
+        # 策略1：整段就是 JSON
+        try:
+            return json.loads(raw)
+        except Exception:
+            pass
+
+        # 策略2：markdown 代码块中的 JSON
+        m = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', raw)
+        if m:
+            try:
+                return json.loads(m.group(1))
+            except Exception:
+                pass
+
+        # 策略3：贪婪匹配第一个包含 issues 键的对象
+        m = re.search(r'\{[\s\S]*?"issues"[\s\S]*\}', raw)
+        if m:
+            try:
+                return json.loads(m.group())
+            except Exception:
+                pass
+
+        # 策略4：寻找最长合法 JSON
         data = extract_json(raw)
-        return data if data else fallback
+        if data:
+            return data
+
+    # 文件缺失或完全解析失败 → 从 live.json 兜底
+    live_path = WORKSPACE / f"agent_{agent['id']}_live.json"
+    if live_path.exists():
+        try:
+            live  = json.loads(live_path.read_text())
+            cnt   = live.get("issues_count", 0)
+            act   = live.get("action", "")
+            return {
+                "agent":   agent["id"],
+                "role":    agent["role"],
+                "passed":  cnt == 0 and "404" not in act and "失败" not in act,
+                "issues": ([{
+                    "description": f"（报告未写入）最后测试动作: {act}",
+                    "severity":    "medium",
+                    "location":    "",
+                    "fix_hint":    "Agent 未提交完整报告，需根据最后动作人工确认",
+                }] if cnt > 0 else []),
+                "summary": f"报告未写入，根据实时状态推断（最后动作：{act[:60]}）",
+            }
+        except Exception:
+            pass
+
+    return {"agent": agent["id"], "role": agent["role"],
+            "passed": False, "issues": [], "summary": "报告解析失败，且无实时状态可用"}
 
 # ── 阶段 4：并行运行所有 Agent ─────────────────────────────────────────
 def run_all_agents(agents: list, plan: dict, iteration: int) -> list:
