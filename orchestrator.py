@@ -5,9 +5,10 @@ Universal Test Bench Orchestrator
 """
 
 import argparse, subprocess, json, sys, time, threading, webbrowser, re, shutil
+from functools import partial
 from pathlib import Path
 from datetime import datetime
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import HTTPServer, BaseHTTPRequestHandler, SimpleHTTPRequestHandler
 
 # ── 路径 ──────────────────────────────────────────────────────────────
 BASE_DIR       = Path(__file__).parent.absolute()
@@ -18,6 +19,12 @@ REPORTS_DIR    = WORKSPACE / "reports"
 STATUS_FILE    = WORKSPACE / "run.json"
 DASHBOARD_HTML = BASE_DIR / "dashboard" / "index.html"
 DASHBOARD_PORT = 7788
+PROJECT_PORT   = 8765
+PROJECT_URL    = f"http://localhost:{PROJECT_PORT}"
+
+# ── 子 Agent 工具权限（含 Playwright MCP 真实浏览器操作）────────────────
+SUBAGENT_TOOLS = "Read,Write,Bash,Edit,mcp__playwright__*"
+MAIN_CC_TOOLS  = "Read,Write,Bash,Edit"
 
 # ── 状态管理 ──────────────────────────────────────────────────────────
 _status_lock = threading.Lock()
@@ -100,6 +107,22 @@ class _Handler(BaseHTTPRequestHandler):
 def start_dashboard():
     srv = HTTPServer(("localhost", DASHBOARD_PORT), _Handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+# ── 项目 HTTP 服务（给 Playwright 访问）──────────────────────────────
+class _QuietStaticHandler(SimpleHTTPRequestHandler):
+    def log_message(self, *a): pass
+
+def start_project_server():
+    """为 PROJECT_DIR 启动静态 HTTP 服务，供子 Agent 的 Playwright 访问"""
+    handler = partial(_QuietStaticHandler, directory=str(PROJECT_DIR))
+    try:
+        srv = HTTPServer(("localhost", PROJECT_PORT), handler)
+    except OSError:
+        add_event(f"项目服务器端口 {PROJECT_PORT} 被占用，尝试关闭旧进程", "warn")
+        return None
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    add_event(f"项目服务器启动：{PROJECT_URL}")
     return srv
 
 # ── Claude 调用封装 ───────────────────────────────────────────────────
@@ -230,6 +253,8 @@ def analyze_and_generate(task: str) -> dict:
 def generate_brief(agent: dict, plan: dict) -> Path:
     """为单个 agent 生成测试简报，写入文件"""
     others = ", ".join(a["role"] for a in plan["agents"] if a["id"] != agent["id"])
+    is_web = plan.get('project_type') in ('web_app', 'web', 'frontend')
+    web_hint = f"\n注意：项目运行在 {PROJECT_URL}，执行时将有 Playwright 浏览器工具，测试清单应包含**真实交互操作**（点击/输入/按键/截图），不要只写代码审查项。" if is_web else ""
 
     prompt = f"""生成测试简报（Markdown）：
 
@@ -239,7 +264,7 @@ def generate_brief(agent: dict, plan: dict) -> Path:
 角色：{agent['role']}（#{agent['id']}）
 重点：{agent['focus']}
 手段：{agent['approach']}
-其他 Agent（不重复）：{others}
+其他 Agent（不重复）：{others}{web_hint}
 
 简报包含：① 角色定位（2句） ② 具体测试清单（8+条） ③ 报告必须用此 JSON：
 {{"agent":{agent['id']},"role":"{agent['role']}","passed":true/false,"issues":[{{"description":"","severity":"high/medium/low","location":"","fix_hint":""}}],"summary":""}}
@@ -267,6 +292,25 @@ def run_agent(agent: dict, plan: dict, iteration: int) -> dict:
 
     brief = brief_path.read_text(encoding="utf-8")
 
+    is_web = plan.get('project_type') in ('web_app', 'web', 'frontend')
+    web_section = f"""
+## 🌐 真实浏览器测试（可用工具：Playwright MCP）
+项目已通过 HTTP 服务器运行在：**{PROJECT_URL}**
+
+你必须使用 Playwright 工具进行**真实用户交互**，而不是只做代码审查：
+- `mcp__playwright__browser_navigate` → 打开 {PROJECT_URL}
+- `mcp__playwright__browser_snapshot` → 获取页面结构（看 DOM 树）
+- `mcp__playwright__browser_click` → 点击按钮、链接、卡片
+- `mcp__playwright__browser_type` → 在输入框填内容
+- `mcp__playwright__browser_press_key` → 按键盘（方向键、Enter 等）
+- `mcp__playwright__browser_take_screenshot` → 截图保存视觉证据
+- `mcp__playwright__browser_evaluate` → 在页面里执行 JS 取运行时状态
+- `mcp__playwright__browser_console_messages` → 看浏览器控制台报错
+- `mcp__playwright__browser_wait_for` → 等待动画/元素出现
+
+**关键原则**：发现按钮 → 真的去点它；发现输入框 → 真的去输入；观察实际效果，不要只看代码"应该"做什么。
+""" if is_web else ""
+
     runtime_note = f"""
 
 ---
@@ -276,15 +320,17 @@ def run_agent(agent: dict, plan: dict, iteration: int) -> dict:
 - 运行方式：{plan.get('how_to_run', '查看项目目录')}
 - 报告路径：`{report_path}`
 - 实时状态路径：`{status_path}`
-
+{web_section}
 ## 实时状态更新规范
 每完成一个测试项，立即将以下 JSON 写入实时状态文件（覆盖写入）：
 ```json
 {{"action": "当前正在做的事情（一句话）", "issues_count": 当前已发现问题数}}
 ```
 
-## 完成规范
-全部测试结束后，将完整报告 JSON 写入报告路径，然后停止。
+## 完成规范（强制）
+⚠️ 测试结束前**必须**将完整报告 JSON 写入报告路径：`{report_path}`
+⚠️ 不写报告文件 = 本次测试作废
+完成报告写入后再退出。
 """
 
     patch_agent(agent["id"], status="running", action="启动中…", issues_count=0)
@@ -294,7 +340,7 @@ def run_agent(agent: dict, plan: dict, iteration: int) -> dict:
     done_event = threading.Event()
 
     def _invoke():
-        call_claude(brief + runtime_note, tools="Read,Write,Bash,Edit", timeout=400)
+        call_claude(brief + runtime_note, tools=SUBAGENT_TOOLS, timeout=600)
         done_event.set()
 
     threading.Thread(target=_invoke, daemon=True).start()
@@ -456,6 +502,10 @@ def main():
 
     # 阶段1：分析 + 生成
     plan = analyze_and_generate(task)
+
+    # 项目是 Web 应用 → 启动静态 HTTP 服务，供 Playwright 访问
+    if plan.get("project_type") in ("web_app", "web", "frontend"):
+        start_project_server()
 
     # 注册 agents 到状态
     patch_status(
