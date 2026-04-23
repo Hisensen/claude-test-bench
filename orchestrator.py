@@ -128,79 +128,84 @@ def extract_json(text: str) -> dict | None:
         pass
     return None
 
-# ── 阶段 1：任务分析 + 项目生成 ────────────────────────────────────────
-def analyze_and_generate(task: str) -> dict:
-    add_event("主CC：分析任务并生成项目…")
-    patch_status(status="generating")
+# ── 阶段 1a：生成项目代码 ─────────────────────────────────────────────
+def generate_project(task: str):
+    """专注生成代码，不做其他事"""
+    add_event("主CC：生成项目代码…")
+    prompt = f"""任务：{task}
 
-    prompt = f"""你是一名全栈工程师兼测试架构师。
+将完整可运行的项目代码写入目录 {PROJECT_DIR}。
+规则：
+- 网页类 → 单文件 index.html（CSS/JS 全部内嵌）
+- CLI 工具 → main.py 或 main.js
+- 代码必须完整，不省略任何逻辑，可直接运行
+- 不需要解释，直接写文件
 
-## 用户任务
-{task}
+写完后输出一行：PROJECT_GENERATED"""
+    call_claude(prompt, tools="Write,Bash,Edit", timeout=600)
+    add_event("主CC：代码写入完成")
 
-## 你需要完成的两件事
+# ── 阶段 1b：分析项目，生成测试计划 ──────────────────────────────────────
+def plan_project(task: str) -> dict:
+    """读取已生成的项目，决定 Agent 数量和角色"""
+    add_event("主CC：分析项目，制定测试计划…")
+    prompt = f"""查看目录 {PROJECT_DIR} 中已生成的项目文件（用 ls/cat 阅读），然后直接输出一个 JSON 对象。
 
-### 1. 生成项目
-根据任务生成完整、可运行的项目代码，将所有文件写入目录：
-{PROJECT_DIR}
+任务背景：{task}
 
-要求：
-- 代码完整，逻辑自洽，可以直接运行或在浏览器中打开
-- 如果是网页，写单文件 index.html（内嵌 CSS/JS）
-- 如果是 CLI 工具，写 main.py 或 main.js 等
+JSON 格式（直接输出，不要 markdown 代码块，不要任何额外文字）：
+{{"project_type":"web_app","description":"项目简介","how_to_run":"如何运行（如：在浏览器打开 project/index.html）","tech_stack":"技术栈","agents":[{{"id":1,"role":"角色名","icon":"emoji","focus":"测试重点","approach":"测试手段"}}]}}
 
-### 2. 制定测试计划
-将以下 JSON 写入文件 {WORKSPACE}/plan.json：
+Agent 数量原则：简单项目2-3个，中等3-4个，复杂4-5个。必须包含功能测试角色。"""
 
-```json
-{{
-  "project_type": "web_app | cli | api | library",
-  "description": "一句话描述项目",
-  "how_to_run": "如何访问或运行项目（例：在浏览器打开 project/index.html）",
-  "tech_stack": "技术栈（例：HTML/CSS/JS）",
-  "agents": [
-    {{
-      "id": 1,
-      "role": "角色名",
-      "icon": "一个 emoji",
-      "focus": "该 agent 测试的具体方向（详细）",
-      "approach": "测试手段（代码审查 / 功能测试 / 用户体验 / 安全测试 / 破坏性测试 / 性能测试）"
-    }}
-  ]
-}}
-```
+    output = call_claude(prompt, tools="Read,Bash", timeout=120)
 
-## agent 数量原则
-- 简单项目（CLI/小工具）：2–3 个
-- 中等项目（单页网页/小 API）：3–4 个
-- 复杂项目（多功能网页/全栈）：4–6 个
+    # 多策略提取 JSON
+    plan = _extract_plan_json(output)
+    if plan:
+        # 写入文件备查
+        (WORKSPACE / "plan.json").write_text(
+            json.dumps(plan, ensure_ascii=False, indent=2))
+        add_event(f"主CC：测试计划确定（{plan.get('project_type','?')}，{len(plan.get('agents',[]))} 个 Agent）")
+        return plan
 
-必须包含"功能测试"角色，以及至少一个非功能测试角色（UX/安全/破坏性/性能）。
-不同 agent 的 focus 不能重叠。
+    add_event("主CC：计划解析失败，使用默认 3-agent 方案", "warn")
+    return _default_plan(task)
 
-现在开始工作，先生成项目，再写 plan.json。
-"""
+def _extract_plan_json(text: str) -> dict | None:
+    """多策略从文本中提取合法 plan JSON"""
+    # 策略1：直接解析整个文本
+    try:
+        return json.loads(text.strip())
+    except Exception:
+        pass
+    # 策略2：提取第一个完整 JSON 对象（贪婪匹配）
+    try:
+        m = re.search(r'\{[\s\S]*"agents"[\s\S]*\}', text)
+        if m:
+            return json.loads(m.group())
+    except Exception:
+        pass
+    # 策略3：逐字符找最长合法 JSON
+    for i, ch in enumerate(text):
+        if ch == '{':
+            for j in range(len(text), i, -1):
+                try:
+                    obj = json.loads(text[i:j])
+                    if isinstance(obj, dict) and "agents" in obj:
+                        return obj
+                except Exception:
+                    continue
+    return None
 
-    call_claude(prompt, tools="Read,Write,Bash,Edit", timeout=600)
-
-    plan_file = WORKSPACE / "plan.json"
-    if plan_file.exists():
-        try:
-            plan = json.loads(plan_file.read_text())
-            add_event(f"主CC：项目生成完成（{plan.get('project_type', '?')}，{len(plan.get('agents', []))} 个测试角色）")
-            return plan
-        except Exception:
-            pass
-
-    # 解析失败时的保底计划
-    add_event("主CC：plan.json 解析失败，使用默认 3-agent 计划", "warn")
+def _default_plan(task: str) -> dict:
     return {
         "project_type": "unknown",
         "description":  task,
         "how_to_run":   f"查看 {PROJECT_DIR}",
         "tech_stack":   "未知",
         "agents": [
-            {"id": 1, "role": "功能测试员",   "icon": "🔍",
+            {"id": 1, "role": "功能测试员",    "icon": "🔍",
              "focus": "验证核心功能逻辑是否正确",          "approach": "代码审查+功能测试"},
             {"id": 2, "role": "用户体验测试员", "icon": "👤",
              "focus": "评估易用性和新手上手体验",           "approach": "用户体验"},
@@ -209,55 +214,32 @@ def analyze_and_generate(task: str) -> dict:
         ],
     }
 
+# ── 阶段 1：入口（拆分后的组合调用）──────────────────────────────────────
+def analyze_and_generate(task: str) -> dict:
+    patch_status(status="generating")
+    generate_project(task)          # 专注写代码
+    patch_status(status="planning")
+    return plan_project(task)       # 专注分析计划
+
 # ── 阶段 2：生成测试简报 ───────────────────────────────────────────────
 def generate_brief(agent: dict, plan: dict) -> Path:
     """为单个 agent 生成测试简报，写入文件"""
-    other_agents = [a for a in plan["agents"] if a["id"] != agent["id"]]
+    others = ", ".join(a["role"] for a in plan["agents"] if a["id"] != agent["id"])
 
-    prompt = f"""为以下测试角色生成一份详细的测试简报（Markdown 格式）。
+    prompt = f"""生成测试简报（Markdown）：
 
-## 项目信息
-- 类型：{plan.get('project_type')}
-- 简介：{plan.get('description')}
-- 运行方式：{plan.get('how_to_run')}
-- 技术栈：{plan.get('tech_stack', '未知')}
-- 项目目录：{PROJECT_DIR}
+项目：{plan.get('description')} | 类型：{plan.get('project_type')} | 目录：{PROJECT_DIR}
+运行：{plan.get('how_to_run')}
 
-## 该 Agent 信息
-- ID：{agent['id']}
-- 角色：{agent['role']}
-- 测试重点：{agent['focus']}
-- 测试手段：{agent['approach']}
+角色：{agent['role']}（#{agent['id']}）
+重点：{agent['focus']}
+手段：{agent['approach']}
+其他 Agent（不重复）：{others}
 
-## 其他 Agent（不要重复他们的工作）
-{json.dumps(other_agents, ensure_ascii=False, indent=2)}
-
-## 简报内容要求
-1. **角色定位**：用 2-3 句话描述这个 agent 的视角和目标
-2. **测试清单**：逐条列出可执行的测试项（至少 8 条，要具体）
-3. **报告格式**：最终报告必须是以下 JSON 格式
-
-```json
-{{
-  "agent": {agent['id']},
-  "role": "{agent['role']}",
-  "passed": true,
-  "issues": [
-    {{
-      "description": "问题描述",
-      "severity": "high | medium | low",
-      "location": "涉及的代码位置或功能点",
-      "fix_hint": "修复建议"
-    }}
-  ],
-  "summary": "一句话总结"
-}}
-```
-
-只输出简报内容，不要前言或额外解释。
+简报包含：① 角色定位（2句） ② 具体测试清单（8+条） ③ 报告必须用此 JSON：
+{{"agent":{agent['id']},"role":"{agent['role']}","passed":true/false,"issues":[{{"description":"","severity":"high/medium/low","location":"","fix_hint":""}}],"summary":""}}
 """
-
-    brief_text = call_claude(prompt, tools="", timeout=120)
+    brief_text = call_claude(prompt, tools="", timeout=90)
     brief_path = BRIEFS_DIR / f"agent_{agent['id']}.md"
     brief_path.write_text(brief_text, encoding="utf-8")
     return brief_path
