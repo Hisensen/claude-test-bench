@@ -1,0 +1,88 @@
+{
+  "agent": "agent_4",
+  "role": "破坏性测试员",
+  "passed": false,
+  "issues": [
+    {
+      "game": "井字棋",
+      "type": "race_condition",
+      "description": "AI 落子通过 setTimeout(aiMove, 280) 延迟执行，280ms 内 over 变量仍为 false，玩家可在此窗口内再次点击空格，触发第二次人类落子。aiMove 函数内部不检查 over 标志，会在已有两个 X 的 board 上继续落 O，造成已结束棋局被篡改。具体路径：玩家落 X → over=false，setTimeout(aiMove,280) 被调度 → 280ms 内玩家点击另一格再落 X → aiMove 在包含两个 X 的 board 上执行并写入 O。",
+      "severity": "high",
+      "code_location": "setTimeout(aiMove, 280); // 第505行\nfunction aiMove() { /* 不检查 over 标志 */ for(let i=0;i<9;i++) if(!board[i]){...} }",
+      "reproduce": "1. 打开井字棋；2. 点击格子下 X；3. 在 280ms 内迅速点击另一个空格再下一个 X；4. 观察 aiMove 在 board 已有两个新 X 的状态下继续运行，可能写 O 到已是终局的棋盘上"
+    },
+    {
+      "game": "井字棋",
+      "type": "timer_leak",
+      "description": "cleanup 函数仅 delete window.tttReset，未保存 setTimeout(aiMove, 280) 的定时器 ID，无法 clearTimeout。若玩家在 AI 思考的 280ms 内点击关闭按钮，aiMove 会在游戏 DOM 已销毁后执行，若恰好与另一游戏的同名元素复用会产生跨游戏状态污染。",
+      "severity": "medium",
+      "code_location": "// 第510行 cleanup\nreturn () => { delete window.tttReset; };\n// 没有保存 setTimeout 的 id，无法 clearTimeout",
+      "reproduce": "1. 打开井字棋并落一子；2. 在 280ms AI 思考窗口内立即点击关闭按钮；3. 迅速打开另一款游戏；4. 等待约 280ms 后观察控制台或 DOM 是否有异常写入"
+    },
+    {
+      "game": "猜数字",
+      "type": "boundary",
+      "description": "gGuess 使用 parseInt 解析输入，parseInt 对 '5abc' 这类混合字符串返回 5，被视为合法输入参与比较，而非提示错误。虽不会导致崩溃，但属于预期外的宽松解析行为。输入 NaN 时 !v 为 true 可正确拦截，整体无崩溃风险。",
+      "severity": "low",
+      "code_location": "// 第427-429行\nconst v = parseInt(document.getElementById('g-input').value);\nif (!v || v < 1 || v > 100) { hint.innerHTML='...'; return; }",
+      "reproduce": "1. 打开猜数字；2. 输入 '5abc' 点击猜；3. 观察被识别为数字 5 并参与比较，而非提示输入错误"
+    },
+    {
+      "game": "数学闪题",
+      "type": "race_condition",
+      "description": "maSubmit 在判断答案后调用 setTimeout(next, 550)，但没有禁用确认按钮。用户在 550ms 内可以多次点击确认或按 Enter，每次都会注册一个新的 setTimeout(next, 550)。最终 next() 会被多次调用，导致题目计数 q 越过 10，showEnd() 被多次触发，题目序列乱序。",
+      "severity": "medium",
+      "code_location": "// 第727-733行\nwindow.maSubmit = () => {\n    const v = parseInt(document.getElementById('ma-in').value);\n    if (isNaN(v)) return;\n    // 此处没有禁用按钮，也没有防重复锁\n    setTimeout(next, 550);\n};",
+      "reproduce": "1. 打开数学闪题；2. 输入一个答案后，在 550ms 内连续点击确认按钮 3 次；3. 观察题目快速跳过或 q 变量超过 10 导致 showEnd 被重复调用"
+    },
+    {
+      "game": "反应速度",
+      "type": "timer_leak",
+      "description": "在 state==='wait' 时玩家提前点击，代码执行 clearTimeout(tid)，然后调用 setTimeout(()=>go('wait'), 900)，该 900ms 定时器的返回值未被保存。若玩家在此 900ms 内关闭游戏，cleanup 只能 clearTimeout(tid) 清除最新的 green 定时器，而那个 900ms 的匿名 setTimeout 无法被取消，会继续执行 go('wait') 并操作已销毁的 DOM。",
+      "severity": "medium",
+      "code_location": "// 第657行\nelse if (state==='wait') {\n    clearTimeout(tid);\n    setTimeout(()=>go('wait'),900);  // 返回值未保存，无法 clearTimeout\n    tid=setTimeout(()=>go('green'),1500+Math.random()*2500);\n}\n// cleanup 第673行\nreturn () => { clearTimeout(tid); };  // 仅清 tid，未清那个 900ms 定时器",
+      "reproduce": "1. 打开反应速度；2. 点击开始进入等待（红色）；3. 提前点击触发太早了逻辑；4. 在接下来 900ms 内关闭游戏；5. 900ms 后孤立定时器执行 go('wait') 操作已销毁 DOM"
+    },
+    {
+      "game": "颜色记忆 (Simon)",
+      "type": "state_leak",
+      "description": "Simon 游戏使用 async/await + delay() 实现序列播放，play() 为 async 函数，内部有多个 await delay(500) 和 await delay(220)。若玩家在序列播放中途关闭游戏，cleanup 只执行 delete window.smStart，未取消正在 await 的 Promise 链。这些 Promise 会继续 resolve，后续代码 accepting=true 及 document.getElementById('sm-status').textContent='轮到你了！' 会操作已销毁的 DOM，产生 Cannot set properties of null 类型错误。",
+      "severity": "medium",
+      "code_location": "// 第775-781行\nasync function play() {\n    accepting = false;\n    await delay(500);  // 若此时 cleanup 被调用，后续代码无法取消\n    for (const i of seq) { light(i,true); await delay(500); light(i,false); await delay(220); }\n    accepting = true;\n    document.getElementById('sm-status').textContent = '轮到你了！';\n}\n// cleanup 第815行\nreturn () => { delete window.smStart; };  // 无法取消 async Promise 链",
+      "reproduce": "1. 打开颜色记忆并开始游戏；2. 在序列动画播放中途（约 500ms 内）点击关闭按钮；3. 观察控制台报 Cannot set properties of null 错误"
+    },
+    {
+      "game": "弹球打砖",
+      "type": "boundary",
+      "description": "弹球碰砖检测使用球中心点 (ball.x, ball.y) 与砖块矩形做点碰测试，但球有半径 r=7，视觉上球边缘插入砖块 7px 时才触发碰撞。同时碰撞后只反转 vy 未将球移出砖块范围，若球在同一帧内与多块砖重叠，vy 会被多次反转导致方向错误（偶数次反转后方向不变）。",
+      "severity": "low",
+      "code_location": "// 第930-931行\nbricks.forEach(b=>{ if(!b.alive)return; any=true;\n    if(ball.x>b.x&&ball.x<b.x+BW&&ball.y>b.y&&ball.y<b.y+BH){\n        b.alive=false; ball.vy*=-1;  // 未做位置修正，多砖同帧碰撞 vy 多次反转\n    }\n});",
+      "reproduce": "1. 打开弹球打砖；2. 以较陡角度让球高速穿过多排密集砖块区域；3. 观察球在同一帧内触发多块砖碰撞，vy 被偶数次反转后方向不变"
+    },
+    {
+      "game": "贪吃蛇",
+      "type": "event_leak",
+      "description": "贪吃蛇的 cleanup 函数正确执行了 clearInterval(loop)、document.removeEventListener('keydown', kh) 以及 delete window.snStart。定时器和事件监听器均已正确清理，此项通过，记录为审查确认无问题。",
+      "severity": "low",
+      "code_location": "// 第885行 - 正确实现\nreturn () => { clearInterval(loop); document.removeEventListener('keydown',kh); delete window.snStart; };",
+      "reproduce": "N/A - 此项已确认安全，无泄漏"
+    },
+    {
+      "game": "打地鼠",
+      "type": "race_condition",
+      "description": "mlStart() 在启动前执行 clearInterval(gi); clearInterval(mi) 可防止多次点击开始按钮产生定时器堆叠，同时 ml-btn 在运行期间被 disabled，从 UI 层面也阻止了二次点击。cleanup 函数也正确执行 clearInterval(gi); clearInterval(mi)。gi 和 mi 两个 interval 均在 cleanup 中被清除。此项全部通过，无问题。",
+      "severity": "low",
+      "code_location": "// 第628行 cleanup - 正确实现\nreturn () => { clearInterval(gi); clearInterval(mi); delete window.mlStart; };",
+      "reproduce": "N/A - 此项已确认安全"
+    },
+    {
+      "game": "记忆翻牌",
+      "type": "race_condition",
+      "description": "locked 变量在翻两张牌不匹配时设为 true，850ms 后在 setTimeout 回调中同步执行 flipped=[] 和 locked=false，二者在同一宏任务中完成，不存在中间状态窗口。flip() 首行检查 locked 可正确阻止 850ms 内的第三次点击。此项通过，locked 机制有效。",
+      "severity": "low",
+      "code_location": "// 第551-553行 - 正确实现\nsetTimeout(() => { flipped=[]; locked=false; render(); }, 850);",
+      "reproduce": "N/A - 经确认 locked 机制在 850ms 延迟期间可正确防止第三次翻牌"
+    }
+  ],
+  "summary": "经过完整的代码级静态审查，发现如下稳定性风险：【高危1项】井字棋 AI 落子 280ms 窗口内 aiMove 不检查 over 标志，玩家可在此期间再次落子使 aiMove 篡改已结束棋局；【中危3项】数学闪题 maSubmit 未在 550ms 延迟内禁用按钮，多次快速提交导致 next() 重复调用题目计数失控；反应速度提前点击时产生的 900ms 匿名定时器未保存句柄，cleanup 无法取消，关闭游戏后仍操作已销毁 DOM；颜色记忆 Simon 的 async play() 函数中 await 链无法被取消，关闭游戏时 Promise 继续 resolve 操作 null DOM 产生 TypeError；【低危3项】猜数字 parseInt 对混合字符串宽容解析、弹球打砖同帧多砖碰撞 vy 多次反转、井字棋 setTimeout 句柄未保存导致 cleanup 不完整。贪吃蛇、弹球打砖、打地鼠的定时器及事件监听器 cleanup 均正确，记忆翻牌的 locked 竞态防护有效，均已审查通过。"
+}

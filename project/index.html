@@ -1,0 +1,1083 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎮 游戏乐园 - 10款经典小游戏</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: #0a0a1a;
+            color: #e0e0ff;
+            min-height: 100vh;
+        }
+
+        header {
+            text-align: center;
+            padding: 2.5rem 1rem 1.5rem;
+            background: linear-gradient(135deg, #12123a 0%, #0a0a1a 100%);
+            border-bottom: 1px solid #1e1e4e;
+        }
+
+        header h1 {
+            font-size: 2.8rem;
+            background: linear-gradient(90deg, #a78bfa, #60a5fa, #34d399);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+        }
+
+        header p { color: #6b7280; font-size: 1rem; }
+
+        .game-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+            gap: 1.25rem;
+            padding: 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .game-card {
+            background: linear-gradient(135deg, #13132e, #1a1a40);
+            border: 1px solid #2a2a5a;
+            border-radius: 14px;
+            padding: 1.5rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.25s ease;
+        }
+
+        .game-card:hover {
+            transform: translateY(-5px);
+            border-color: #7c3aed;
+            box-shadow: 0 10px 28px rgba(124, 58, 237, 0.25);
+        }
+
+        .game-card .icon { font-size: 3rem; margin-bottom: 0.75rem; display: block; }
+        .game-card h3 { font-size: 1.05rem; margin-bottom: 0.4rem; color: #e0e0ff; }
+        .game-card p { font-size: 0.8rem; color: #6b7280; line-height: 1.4; }
+
+        .play-btn {
+            margin-top: 1rem;
+            padding: 0.5rem 1.4rem;
+            background: linear-gradient(90deg, #7c3aed, #2563eb);
+            border: none;
+            border-radius: 7px;
+            color: white;
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: opacity 0.2s, transform 0.15s;
+        }
+
+        .play-btn:hover { opacity: 0.88; transform: scale(1.03); }
+
+        /* ── Overlay ─────────────────────── */
+        .overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.82);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+            backdrop-filter: blur(5px);
+        }
+
+        .overlay.hidden { display: none; }
+
+        .game-panel {
+            background: #0d0d28;
+            border: 1px solid #4c1d95;
+            border-radius: 18px;
+            padding: 2rem;
+            width: 92vw;
+            max-width: 680px;
+            max-height: 88vh;
+            overflow-y: auto;
+            position: relative;
+        }
+
+        .close-btn {
+            position: absolute;
+            top: 0.9rem;
+            right: 0.9rem;
+            background: #2a1a3e;
+            border: 1px solid #5a3a8a;
+            color: #ddd;
+            padding: 0.35rem 0.75rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .close-btn:hover { background: #7f1d1d; color: white; border-color: #ef4444; }
+
+        /* ── Shared game styles ──────────── */
+        .game-title {
+            font-size: 1.5rem;
+            margin-bottom: 0.75rem;
+            text-align: center;
+            padding-right: 2rem;
+        }
+
+        .sub-title {
+            text-align: center;
+            color: #6b7280;
+            font-size: 0.85rem;
+            margin-bottom: 1rem;
+        }
+
+        .btn {
+            padding: 0.55rem 1.3rem;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.95rem;
+            font-weight: 500;
+            transition: all 0.18s;
+            display: inline-block;
+        }
+
+        .btn-primary { background: linear-gradient(90deg, #7c3aed, #2563eb); color: white; }
+        .btn-secondary { background: #1f1f3a; color: #ccc; border: 1px solid #333; }
+        .btn:hover { opacity: 0.87; transform: scale(1.02); }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+        .status-msg {
+            text-align: center;
+            font-size: 1.05rem;
+            padding: 0.6rem 1rem;
+            border-radius: 8px;
+            margin: 0.6rem 0;
+        }
+
+        .status-win  { background: rgba(34,197,94,0.15);  color: #22c55e; }
+        .status-lose { background: rgba(239,68,68,0.15);  color: #ef4444; }
+        .status-info { background: rgba(124,58,237,0.15); color: #a78bfa; }
+
+        .score-row {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            margin-bottom: 0.75rem;
+            font-size: 0.95rem;
+        }
+
+        .score-row span { color: #a78bfa; }
+
+        /* ── Game-specific ───────────────── */
+
+        /* Tic-tac-toe */
+        .ttt-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 90px);
+            gap: 6px;
+            margin: 1rem auto;
+            width: fit-content;
+        }
+
+        .ttt-cell {
+            height: 90px;
+            background: #131330;
+            border: 2px solid #2a2a5a;
+            border-radius: 10px;
+            font-size: 2.8rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.15s;
+            user-select: none;
+        }
+
+        .ttt-cell:hover:not(.taken) { background: #1e1e48; }
+        .ttt-cell.x { color: #a78bfa; }
+        .ttt-cell.o { color: #f87171; }
+
+        /* Memory */
+        .memory-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 72px);
+            gap: 8px;
+            margin: 1rem auto;
+            width: fit-content;
+        }
+
+        .memory-card {
+            height: 72px;
+            background: #131330;
+            border: 2px solid #2a2a5a;
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.9rem;
+            transition: all 0.25s;
+            user-select: none;
+        }
+
+        .memory-card.flipped  { background: #1e1850; border-color: #7c3aed; }
+        .memory-card.matched  { background: #14291a; border-color: #22c55e; opacity: 0.55; cursor: default; }
+
+        /* Whack-a-mole */
+        .mole-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 90px);
+            gap: 10px;
+            margin: 1rem auto;
+            width: fit-content;
+        }
+
+        .mole-hole {
+            height: 90px;
+            background: #1a0e00;
+            border: 3px solid #3a2000;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.5rem;
+            cursor: pointer;
+            transition: background 0.15s;
+            user-select: none;
+        }
+
+        .mole-hole.active { background: #2d1a00; }
+
+        /* Reaction */
+        #reaction-box {
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 1.2rem;
+            margin: 1rem 0;
+            user-select: none;
+            height: 170px;
+            transition: background 0.2s;
+        }
+
+        /* Simon */
+        .simon-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 115px);
+            gap: 10px;
+            margin: 1rem auto;
+            width: fit-content;
+        }
+
+        .simon-btn {
+            height: 115px;
+            border-radius: 50%;
+            border: 4px solid transparent;
+            cursor: pointer;
+            opacity: 0.55;
+            transition: all 0.12s;
+        }
+
+        .simon-btn.lit { opacity: 1; transform: scale(1.08); box-shadow: 0 0 22px currentColor; }
+
+        canvas {
+            border: 2px solid #4c1d95;
+            border-radius: 10px;
+            display: block;
+            margin: 0.5rem auto;
+            max-width: 100%;
+        }
+
+        /* Minesweeper */
+        #mine-grid {
+            display: grid;
+            grid-template-columns: repeat(9, 30px);
+            gap: 2px;
+            margin: 0.75rem auto;
+            width: fit-content;
+        }
+
+        .mine-cell {
+            width: 30px;
+            height: 30px;
+            background: #1e1e40;
+            border: 1px solid #3a3a6a;
+            border-radius: 3px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.72rem;
+            font-weight: 700;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.1s;
+        }
+
+        .mine-cell:hover:not(.revealed) { background: #2a2a60; }
+        .mine-cell.revealed { background: #12122a; cursor: default; }
+        .mine-cell.flagged  { background: #2a0e18; }
+        .mine-cell.boom     { background: #7f1d1d; }
+
+        /* Number input */
+        .num-input {
+            background: #131330;
+            border: 1.5px solid #3a3a6a;
+            color: #e0e0ff;
+            padding: 0.55rem 0.75rem;
+            border-radius: 7px;
+            font-size: 1.05rem;
+            text-align: center;
+            width: 140px;
+        }
+
+        .num-input:focus { outline: none; border-color: #7c3aed; }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>🎮 游戏乐园</h1>
+    <p>10款经典小游戏，点击卡片即可开始</p>
+</header>
+
+<div class="game-grid" id="gameGrid"></div>
+
+<div id="gameOverlay" class="overlay hidden">
+    <div class="game-panel">
+        <button class="close-btn" id="closeBtn">✕ 退出</button>
+        <div id="gameContent"></div>
+    </div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════
+//  Game Registry
+// ════════════════════════════════════════════════════════
+const GAMES = [
+    { id:'guess',    name:'猜数字',    icon:'🔢', desc:'猜出1–100之间的神秘数字',     init: initGuess    },
+    { id:'ttt',      name:'井字棋',    icon:'⭕', desc:'挑战 AI，三连成线获胜',       init: initTTT      },
+    { id:'memory',   name:'记忆翻牌',  icon:'🃏', desc:'翻开卡牌，找出所有配对',      init: initMemory   },
+    { id:'mole',     name:'打地鼠',    icon:'🐹', desc:'30秒内打倒尽可能多的地鼠',    init: initMole     },
+    { id:'reaction', name:'反应速度',  icon:'⚡', desc:'测试你的极限反应时间',        init: initReaction },
+    { id:'math',     name:'数学闪题',  icon:'🧮', desc:'快速回答10道算术题',          init: initMath     },
+    { id:'simon',    name:'颜色记忆',  icon:'🎨', desc:'记住并重复颜色序列',          init: initSimon    },
+    { id:'snake',    name:'贪吃蛇',    icon:'🐍', desc:'方向键控制蛇，吃食物长大',    init: initSnake    },
+    { id:'breakout', name:'弹球打砖',  icon:'🧱', desc:'鼠标控制挡板，打碎所有砖块',  init: initBreakout },
+    { id:'mine',     name:'扫雷',      icon:'💣', desc:'找出所有地雷，别踩上去',      init: initMine     },
+];
+
+let cleanupFn = null;
+
+function renderGrid() {
+    document.getElementById('gameGrid').innerHTML = GAMES.map((g, i) => `
+        <div class="game-card" id="card-${g.id}" onclick="openGame(${i})">
+            <span class="icon">${g.icon}</span>
+            <h3>${g.name}</h3>
+            <p>${g.desc}</p>
+            <button class="play-btn">开始游戏</button>
+        </div>
+    `).join('');
+}
+
+function openGame(i) {
+    const g = GAMES[i];
+    const content = document.getElementById('gameContent');
+    content.innerHTML = '';
+    document.getElementById('gameOverlay').classList.remove('hidden');
+    cleanupFn = g.init(content) || null;
+}
+
+function closeGame() {
+    if (cleanupFn) { cleanupFn(); cleanupFn = null; }
+    document.getElementById('gameOverlay').classList.add('hidden');
+    document.getElementById('gameContent').innerHTML = '';
+}
+
+document.getElementById('closeBtn').addEventListener('click', closeGame);
+document.getElementById('gameOverlay').addEventListener('click', e => {
+    if (e.target.id === 'gameOverlay') closeGame();
+});
+
+// ════════════════════════════════════════════════════════
+//  Game 1 – 猜数字
+// ════════════════════════════════════════════════════════
+function initGuess(el) {
+    let target = rand(1, 100), tries = 0;
+
+    el.innerHTML = `
+        <h2 class="game-title">🔢 猜数字</h2>
+        <p class="sub-title">我想了一个 1–100 的数，你来猜</p>
+        <div style="text-align:center;margin-top:1rem">
+            <div id="g-hint" style="min-height:2rem;font-size:1.15rem;margin-bottom:1rem"></div>
+            <input class="num-input" id="g-input" type="number" min="1" max="100" placeholder="输入数字">
+            <br><br>
+            <button class="btn btn-primary" onclick="gGuess()">猜！</button>
+            <button class="btn btn-secondary" style="margin-left:.5rem" onclick="gReset()">重置</button>
+            <p id="g-tries" style="margin-top:.75rem;color:#6b7280">已猜: 0 次</p>
+        </div>
+    `;
+
+    document.getElementById('g-input').addEventListener('keydown', e => { if (e.key==='Enter') gGuess(); });
+
+    window.gGuess = () => {
+        const v = parseInt(document.getElementById('g-input').value);
+        const hint = document.getElementById('g-hint');
+        if (!v || v < 1 || v > 100) { hint.innerHTML = '<span style="color:#ef4444">请输入 1–100 之间的整数</span>'; return; }
+        tries++;
+        document.getElementById('g-tries').textContent = `已猜: ${tries} 次`;
+        document.getElementById('g-input').value = '';
+        if (v === target) {
+            hint.innerHTML = `<span style="color:#22c55e">🎉 恭喜！用了 ${tries} 次猜中了！</span>`;
+            document.getElementById('g-input').disabled = true;
+        } else {
+            hint.innerHTML = v < target
+                ? '<span style="color:#f59e0b">📈 太小了，往大猜</span>'
+                : '<span style="color:#f59e0b">📉 太大了，往小猜</span>';
+        }
+    };
+
+    window.gReset = () => {
+        target = rand(1,100); tries = 0;
+        document.getElementById('g-hint').innerHTML = '';
+        document.getElementById('g-tries').textContent = '已猜: 0 次';
+        document.getElementById('g-input').disabled = false;
+        document.getElementById('g-input').value = '';
+    };
+
+    return () => { delete window.gGuess; delete window.gReset; };
+}
+
+// ════════════════════════════════════════════════════════
+//  Game 2 – 井字棋
+// ════════════════════════════════════════════════════════
+function initTTT(el) {
+    let board = Array(9).fill(''), over = false, aiTimer = null;
+
+    const WINS = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+    const wins = (b, p) => WINS.some(w => w.every(i => b[i]===p));
+    const full  = b => b.every(Boolean);
+
+    function render() {
+        document.querySelectorAll('.ttt-cell').forEach((c,i) => {
+            c.textContent = board[i];
+            c.className   = 'ttt-cell' + (board[i] ? ` ${board[i].toLowerCase()} taken` : '');
+        });
+    }
+
+    function endMsg(msg, cls) {
+        document.getElementById('ttt-status').innerHTML = `<div class="status-msg ${cls}">${msg}</div>`;
+    }
+
+    function aiMove() {
+        if (over) return;
+        // try win
+        for (let i=0;i<9;i++) if(!board[i]){board[i]='O';if(wins(board,'O')){render();endMsg('🤖 AI 赢了！','status-lose');over=true;return;}board[i]='';}
+        // block
+        for (let i=0;i<9;i++) if(!board[i]){board[i]='X';if(wins(board,'X')){board[i]='O';render();if(full(board)){endMsg('🤝 平局！','status-info');over=true;}return;}board[i]='';}
+        // center
+        if (!board[4]) board[4]='O';
+        else { const e=board.map((v,i)=>v?-1:i).filter(x=>x>=0); board[e[rand(0,e.length-1)]]='O'; }
+        render();
+        if (full(board) && !wins(board,'O')) { endMsg('🤝 平局！','status-info'); over=true; }
+    }
+
+    el.innerHTML = `
+        <h2 class="game-title">⭕ 井字棋</h2>
+        <p class="sub-title">你是 X，AI 是 O，点格子落子，三连成线获胜</p>
+        <div class="ttt-grid">
+            ${Array(9).fill('<div class="ttt-cell"></div>').join('')}
+        </div>
+        <div id="ttt-status"></div>
+        <div style="text-align:center;margin-top:.75rem">
+            <button class="btn btn-secondary" onclick="tttReset()">重新开始</button>
+        </div>
+    `;
+
+    document.querySelectorAll('.ttt-cell').forEach((c,i) => {
+        c.addEventListener('click', () => {
+            if (over || board[i]) return;
+            board[i]='X'; render();
+            if (wins(board,'X')) { endMsg('🎉 你赢了！','status-win'); over=true; return; }
+            if (full(board))     { endMsg('🤝 平局！','status-info'); over=true; return; }
+            aiTimer = setTimeout(aiMove, 280);
+        });
+    });
+
+    window.tttReset = () => {
+        clearTimeout(aiTimer); aiTimer = null;
+        board=Array(9).fill(''); over=false;
+        document.getElementById('ttt-status').innerHTML=''; render();
+    };
+    return () => { clearTimeout(aiTimer); delete window.tttReset; };
+}
+
+// ════════════════════════════════════════════════════════
+//  Game 3 – 记忆翻牌
+// ════════════════════════════════════════════════════════
+function initMemory(el) {
+    const ICONS = ['🍎','🍊','🍋','🍇','🍓','🍑','🍒','🥝'];
+    let cards, flipped, matched, moves, locked;
+
+    function newGame() {
+        cards   = shuffle([...ICONS,...ICONS]);
+        flipped = [];
+        matched = new Set();
+        moves   = 0;
+        locked  = false;
+        document.getElementById('mem-moves').textContent = '步数: 0';
+        document.getElementById('mem-status').innerHTML  = '';
+        render();
+    }
+
+    function render() {
+        document.querySelectorAll('.memory-card').forEach((c,i) => {
+            const show = flipped.includes(i) || matched.has(i);
+            c.textContent = show ? cards[i] : '❓';
+            c.className   = 'memory-card' + (matched.has(i)?' matched':flipped.includes(i)?' flipped':'');
+        });
+        document.getElementById('mem-moves').textContent = `步数: ${moves}`;
+    }
+
+    function flip(i) {
+        if (locked || flipped.includes(i) || matched.has(i)) return;
+        flipped.push(i); render();
+        if (flipped.length < 2) return;
+        moves++; locked = true;
+        if (cards[flipped[0]] === cards[flipped[1]]) {
+            matched.add(flipped[0]); matched.add(flipped[1]);
+            flipped = []; locked = false; render();
+            if (matched.size === 16)
+                document.getElementById('mem-status').innerHTML =
+                    `<div class="status-msg status-win">🎉 完成！共用了 ${moves} 步</div>`;
+        } else {
+            setTimeout(() => { flipped=[]; locked=false; render(); }, 850);
+        }
+    }
+
+    el.innerHTML = `
+        <h2 class="game-title">🃏 记忆翻牌</h2>
+        <p class="sub-title">点击翻开卡牌，找出 8 对相同的图案</p>
+        <p id="mem-moves" style="text-align:center;color:#a78bfa;margin-bottom:.5rem;font-size:.9rem">步数: 0</p>
+        <div class="memory-grid">
+            ${Array(16).fill('<div class="memory-card">❓</div>').join('')}
+        </div>
+        <div id="mem-status"></div>
+        <div style="text-align:center;margin-top:.75rem">
+            <button class="btn btn-secondary" onclick="memReset()">重新开始</button>
+        </div>
+    `;
+
+    document.querySelectorAll('.memory-card').forEach((c,i) => c.addEventListener('click', ()=>flip(i)));
+    window.memReset = newGame;
+    newGame();
+    return () => { delete window.memReset; };
+}
+
+// ════════════════════════════════════════════════════════
+//  Game 4 – 打地鼠
+// ════════════════════════════════════════════════════════
+function initMole(el) {
+    let score=0, timeLeft=30, active=-1, gi, mi, running=false;
+
+    el.innerHTML = `
+        <h2 class="game-title">🐹 打地鼠</h2>
+        <p class="sub-title">点击"开始游戏"，然后快速点击冒出来的地鼠得分</p>
+        <div class="score-row">
+            <span id="ml-score">得分: 0</span>
+            <span id="ml-time" style="color:#f59e0b">时间: 30s</span>
+        </div>
+        <div class="mole-grid">
+            ${Array(9).fill('<div class="mole-hole"></div>').join('')}
+        </div>
+        <div id="ml-status"></div>
+        <div style="text-align:center;margin-top:.75rem">
+            <button id="ml-btn" class="btn btn-primary" onclick="mlStart()">开始游戏</button>
+        </div>
+    `;
+
+    const holes = () => document.querySelectorAll('.mole-hole');
+
+    function showMole() {
+        holes().forEach(h => { h.textContent=''; h.classList.remove('active'); });
+        active = rand(0,8);
+        const h = holes()[active];
+        if (h) { h.textContent='🐹'; h.classList.add('active'); }
+    }
+
+    window.mlStart = () => {
+        score=0; timeLeft=30; running=true;
+        document.getElementById('ml-score').textContent = '得分: 0';
+        document.getElementById('ml-time').textContent  = '时间: 30s';
+        document.getElementById('ml-status').innerHTML  = '';
+        document.getElementById('ml-btn').disabled = true;
+        clearInterval(gi); clearInterval(mi);
+        gi = setInterval(()=>{ timeLeft--; document.getElementById('ml-time').textContent=`时间: ${timeLeft}s`;
+            if(timeLeft<=0){ clearInterval(gi);clearInterval(mi);running=false;
+                holes().forEach(h=>{h.textContent='';h.classList.remove('active');});
+                document.getElementById('ml-status').innerHTML=`<div class="status-msg status-info">🎯 游戏结束！得分: ${score}</div>`;
+                document.getElementById('ml-btn').disabled=false;
+                document.getElementById('ml-btn').textContent='再玩一次';
+            }
+        },1000);
+        mi = setInterval(showMole, 750);
+    };
+
+    holes().forEach((h,i) => h.addEventListener('click', ()=>{
+        if(!running || i!==active) return;
+        score++; h.textContent=''; h.classList.remove('active'); active=-1;
+        document.getElementById('ml-score').textContent=`得分: ${score}`;
+    }));
+
+    return () => { clearInterval(gi); clearInterval(mi); delete window.mlStart; };
+}
+
+// ════════════════════════════════════════════════════════
+//  Game 5 – 反应速度
+// ════════════════════════════════════════════════════════
+function initReaction(el) {
+    let state='idle', t0, results=[], tid;
+
+    el.innerHTML = `
+        <h2 class="game-title">⚡ 反应速度</h2>
+        <p class="sub-title">绿色出现时立刻点击，共 5 轮</p>
+        <div id="rx-box" style="width:100%;height:170px;border-radius:14px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:1.15rem;background:#131330;margin:1rem 0;user-select:none">
+            点击开始
+        </div>
+        <div id="rx-info" style="text-align:center;color:#a78bfa;min-height:1.5rem"></div>
+    `;
+
+    const box = document.getElementById('rx-box');
+
+    function go(s) {
+        state = s;
+        if (s==='wait')  { box.style.background='#4a0808'; box.textContent='等待变绿…'; }
+        if (s==='green') { box.style.background='#14532d'; box.textContent='点击！！！'; t0=Date.now(); }
+        if (s==='idle')  { box.style.background='#131330'; box.textContent='点击开始'; }
+    }
+
+    box.addEventListener('click', () => {
+        if (state==='idle') { results=[]; go('wait'); tid=setTimeout(()=>go('green'), 1500+Math.random()*2500); }
+        else if (state==='wait') { clearTimeout(tid); document.getElementById('rx-info').textContent='太早了！重来…'; tid=setTimeout(()=>{ go('wait'); tid=setTimeout(()=>go('green'),1500+Math.random()*2500); },900); }
+        else if (state==='green') {
+            const rt = Date.now()-t0; results.push(rt);
+            if (results.length < 5) {
+                state='between'; box.style.background='#131330'; box.textContent='继续点击';
+                document.getElementById('rx-info').textContent=`第 ${results.length} 轮: ${rt} ms`;
+            } else {
+                const avg = Math.round(results.reduce((a,b)=>a+b,0)/5);
+                box.style.background='#131330'; box.textContent='点击重来';
+                document.getElementById('rx-info').innerHTML=
+                    `<div class="status-msg status-win">平均反应: ${avg} ms &nbsp;${avg<200?'🏆超人！':avg<300?'⚡很快！':avg<400?'👍不错！':'🐢继续练'}<br><small style="opacity:.7">再次点击上方方块重新开始</small></div>`;
+                state='idle'; results=[];
+            }
+        } else if (state==='between') { go('wait'); tid=setTimeout(()=>go('green'),1500+Math.random()*2500); }
+    });
+
+    return () => { clearTimeout(tid); };
+}
+
+// ════════════════════════════════════════════════════════
+//  Game 6 – 数学闪题
+// ════════════════════════════════════════════════════════
+function initMath(el) {
+    let q=0, score=0, ans;
+
+    el.innerHTML = `
+        <h2 class="game-title">🧮 数学闪题</h2>
+        <div class="score-row">
+            <span id="ma-prog">第 1/10 题</span>
+            <span id="ma-score">得分: 0</span>
+        </div>
+        <div id="ma-q" style="font-size:2.6rem;text-align:center;margin:1rem 0;color:#a78bfa;min-height:3.5rem"></div>
+        <div style="text-align:center">
+            <input class="num-input" id="ma-in" type="number" placeholder="答案…">
+            <br><br>
+            <button id="ma-btn" class="btn btn-primary" onclick="maSubmit()">确认</button>
+        </div>
+        <div id="ma-fb" style="text-align:center;font-size:1.1rem;margin-top:.75rem;min-height:1.8rem"></div>
+    `;
+
+    document.getElementById('ma-in').addEventListener('keydown', e => { if(e.key==='Enter') maSubmit(); });
+
+    function next() {
+        if (q >= 10) { showEnd(); return; }
+        const ops = ['+','-','×'];
+        const op = ops[rand(0,2)];
+        let a,b;
+        if(op==='+'){a=rand(1,50);b=rand(1,50);ans=a+b;}
+        else if(op==='-'){a=rand(20,70);b=rand(1,a);ans=a-b;}
+        else{a=rand(1,12);b=rand(1,12);ans=a*b;}
+        document.getElementById('ma-q').textContent=`${a} ${op} ${b} = ?`;
+        document.getElementById('ma-prog').textContent=`第 ${q+1}/10 题`;
+        document.getElementById('ma-fb').textContent='';
+        document.getElementById('ma-in').value='';
+        document.getElementById('ma-in').focus();
+        q++;
+    }
+
+    function showEnd() {
+        document.getElementById('ma-q').textContent='';
+        document.getElementById('ma-prog').textContent='';
+        document.getElementById('ma-in').style.display='none';
+        document.getElementById('ma-btn').style.display='none';
+        document.getElementById('ma-fb').innerHTML=
+            `<div class="status-msg ${score>=8?'status-win':score>=5?'status-info':'status-lose'}">
+            ${score}/10 题正确 &nbsp; ${score===10?'🏆满分！':score>=8?'🌟优秀！':score>=6?'👍良好！':'💪加油！'}
+            </div>
+            <button class="btn btn-secondary" onclick="maReset()" style="margin-top:.75rem">再来一次</button>`;
+    }
+
+    window.maSubmit = () => {
+        const btn = document.getElementById('ma-btn');
+        if (!btn || btn.disabled) return;
+        const v = parseInt(document.getElementById('ma-in').value);
+        if (isNaN(v)) return;
+        btn.disabled = true;
+        if (v===ans) { score++; document.getElementById('ma-score').textContent=`得分: ${score}`; document.getElementById('ma-fb').innerHTML='<span style="color:#22c55e">✓ 正确！</span>'; }
+        else { document.getElementById('ma-fb').innerHTML=`<span style="color:#ef4444">✗ 答案是 ${ans}</span>`; }
+        setTimeout(() => { btn.disabled = false; next(); }, 550);
+    };
+
+    window.maReset = () => {
+        q=0; score=0;
+        document.getElementById('ma-score').textContent='得分: 0';
+        document.getElementById('ma-in').style.display='';
+        document.getElementById('ma-btn').style.display='';
+        next();
+    };
+
+    next();
+    return () => { delete window.maSubmit; delete window.maReset; };
+}
+
+// ════════════════════════════════════════════════════════
+//  Game 7 – 颜色记忆 (Simon Says)
+// ════════════════════════════════════════════════════════
+function initSimon(el) {
+    const COLS = ['#ef4444','#22c55e','#3b82f6','#eab308'];
+    let seq=[], usr=[], level=0, accepting=false, cancelled=false;
+
+    el.innerHTML = `
+        <h2 class="game-title">🎨 颜色记忆</h2>
+        <p class="sub-title">观察颜色按钮的闪烁顺序，然后按相同顺序点击</p>
+        <p id="sm-level" style="text-align:center;color:#a78bfa;font-size:.9rem;margin-bottom:.25rem">关卡: 0</p>
+        <div class="simon-grid">
+            ${COLS.map((c,i)=>`<button class="simon-btn" style="background:${c}" data-i="${i}"></button>`).join('')}
+        </div>
+        <div id="sm-status" style="text-align:center;margin:.5rem 0;font-size:.95rem;min-height:1.8rem">点击开始</div>
+        <div style="text-align:center">
+            <button id="sm-start" class="btn btn-primary" onclick="smStart()">开始游戏</button>
+        </div>
+    `;
+
+    const btns = () => document.querySelectorAll('.simon-btn');
+
+    function light(i, on) {
+        const b = btns()[i];
+        if (!b) return;
+        b.classList.toggle('lit', on);
+        b.style.borderColor = on ? 'white' : 'transparent';
+    }
+
+    async function play() {
+        accepting = false;
+        const statusEl = document.getElementById('sm-status');
+        if (!statusEl) return;
+        statusEl.textContent = '观看序列…';
+        await delay(500);
+        for (const i of seq) {
+            if (cancelled) return;
+            light(i,true); await delay(500);
+            if (cancelled) return;
+            light(i,false); await delay(220);
+        }
+        if (cancelled) return;
+        accepting = true; usr = [];
+        if (statusEl) statusEl.textContent = '轮到你了！';
+    }
+
+    function press(i) {
+        if (!accepting) return;
+        light(i,true); setTimeout(()=>light(i,false),180);
+        usr.push(i);
+        const pos = usr.length-1;
+        if (usr[pos] !== seq[pos]) {
+            accepting = false;
+            const s = document.getElementById('sm-status');
+            if (s) s.innerHTML=`<div class="status-msg status-lose">❌ 错了！到达第 ${level} 关</div>`;
+            const btn = document.getElementById('sm-start');
+            if (btn) btn.style.display='';
+            return;
+        }
+        if (usr.length === seq.length) {
+            const s = document.getElementById('sm-status');
+            if (s) s.innerHTML='<div class="status-msg status-win">✓ 正确！下一关…</div>';
+            setTimeout(addRound, 1000);
+        }
+    }
+
+    function addRound() {
+        if (cancelled) return;
+        seq.push(rand(0,3)); level++;
+        const lv = document.getElementById('sm-level');
+        if (lv) lv.textContent=`关卡: ${level}`;
+        play();
+    }
+
+    window.smStart = () => {
+        cancelled = false;
+        seq=[]; usr=[]; level=0;
+        const btn = document.getElementById('sm-start');
+        if (btn) btn.style.display='none';
+        addRound();
+    };
+
+    btns().forEach((b,i) => b.addEventListener('click', ()=>press(i)));
+    return () => { cancelled = true; accepting = false; delete window.smStart; };
+}
+
+// ════════════════════════════════════════════════════════
+//  Game 8 – 贪吃蛇
+// ════════════════════════════════════════════════════════
+function initSnake(el) {
+    const SZ=20, C=15, R=15;
+    let snake, dir, nd, food, score, loop, alive=false;
+
+    el.innerHTML = `
+        <h2 class="game-title">🐍 贪吃蛇</h2>
+        <p class="sub-title" id="sn-score">得分: 0 &nbsp;|&nbsp; 方向键 / WASD 控制</p>
+        <canvas id="sn-cv" width="${C*SZ}" height="${R*SZ}"></canvas>
+        <div id="sn-status" style="text-align:center;margin-top:.4rem"></div>
+        <div style="text-align:center;margin-top:.5rem">
+            <button class="btn btn-primary" onclick="snStart()">开始 / 重置</button>
+        </div>
+    `;
+
+    const cv = document.getElementById('sn-cv');
+    const cx = cv.getContext('2d');
+
+    function placeFood() {
+        do { food={x:rand(0,C-1),y:rand(0,R-1)}; } while(snake.some(s=>s.x===food.x&&s.y===food.y));
+    }
+
+    function draw() {
+        cx.fillStyle='#0a0a1a'; cx.fillRect(0,0,cv.width,cv.height);
+        cx.fillStyle='#ef4444'; cx.beginPath(); cx.arc(food.x*SZ+SZ/2,food.y*SZ+SZ/2,SZ/2-2,0,Math.PI*2); cx.fill();
+        snake.forEach((s,i)=>{ cx.fillStyle=i?'#15803d':'#4ade80'; cx.fillRect(s.x*SZ+1,s.y*SZ+1,SZ-2,SZ-2); });
+    }
+
+    function tick() {
+        dir = nd;
+        const h = {x:snake[0].x+dir.x, y:snake[0].y+dir.y};
+        if (h.x<0||h.x>=C||h.y<0||h.y>=R||snake.some(s=>s.x===h.x&&s.y===h.y)) {
+            clearInterval(loop); alive=false;
+            document.getElementById('sn-status').innerHTML=`<div class="status-msg status-lose">💀 游戏结束！得分: ${score}</div>`;
+            return;
+        }
+        snake.unshift(h);
+        if (h.x===food.x&&h.y===food.y) { score++; document.getElementById('sn-score').textContent=`得分: ${score} | 方向键/WASD`; placeFood(); }
+        else snake.pop();
+        draw();
+    }
+
+    window.snStart = () => {
+        clearInterval(loop);
+        snake=[{x:7,y:7},{x:6,y:7},{x:5,y:7}]; dir={x:1,y:0}; nd={x:1,y:0};
+        score=0; alive=true;
+        document.getElementById('sn-score').textContent='得分: 0 | 方向键/WASD';
+        document.getElementById('sn-status').innerHTML='';
+        placeFood(); draw();
+        loop = setInterval(tick,140);
+    };
+
+    const kh = e => {
+        if (!alive) return;
+        const m={ArrowUp:{x:0,y:-1},ArrowDown:{x:0,y:1},ArrowLeft:{x:-1,y:0},ArrowRight:{x:1,y:0},
+                  w:{x:0,y:-1},s:{x:0,y:1},a:{x:-1,y:0},d:{x:1,y:0}};
+        const n=m[e.key]; if(n&&!(n.x===-nd.x&&n.y===-nd.y)){nd=n;e.preventDefault();}
+    };
+
+    document.addEventListener('keydown', kh);
+
+    cx.fillStyle='#0a0a1a'; cx.fillRect(0,0,cv.width,cv.height);
+    cx.fillStyle='#3a3a6a'; cx.font='1rem sans-serif'; cx.textAlign='center';
+    cx.fillText('点击"开始"游戏', cv.width/2, cv.height/2);
+
+    return () => { clearInterval(loop); document.removeEventListener('keydown',kh); delete window.snStart; };
+}
+
+// ════════════════════════════════════════════════════════
+//  Game 9 – 弹球打砖 (Breakout)
+// ════════════════════════════════════════════════════════
+function initBreakout(el) {
+    const W=400,H=300, ROWS=4, COLS=8;
+    const BW=W/COLS-4, BH=18;
+    let ball,pad,bricks,score,loop,alive=false;
+
+    el.innerHTML = `
+        <h2 class="game-title">🧱 弹球打砖</h2>
+        <p id="bo-score" class="sub-title">得分: 0 &nbsp;|&nbsp; 鼠标控制挡板</p>
+        <canvas id="bo-cv" width="${W}" height="${H}"></canvas>
+        <div id="bo-status" style="text-align:center;margin-top:.4rem"></div>
+        <div style="text-align:center;margin-top:.5rem">
+            <button class="btn btn-primary" onclick="boStart()">开始 / 重置</button>
+        </div>
+    `;
+
+    const cv = document.getElementById('bo-cv');
+    const cx = cv.getContext('2d');
+    const COLORS=['#7c3aed','#2563eb','#0891b2','#059669'];
+
+    function draw() {
+        cx.fillStyle='#0a0a1a'; cx.fillRect(0,0,W,H);
+        bricks.forEach(b=>{ if(!b.alive)return; cx.fillStyle=b.c; cx.fillRect(b.x,b.y,BW,BH); });
+        cx.fillStyle='#7c3aed'; cx.fillRect(pad.x,pad.y,pad.w,12);
+        cx.fillStyle='#fff'; cx.beginPath(); cx.arc(ball.x,ball.y,ball.r,0,Math.PI*2); cx.fill();
+    }
+
+    function tick() {
+        ball.x+=ball.vx; ball.y+=ball.vy;
+        if(ball.x-ball.r<0||ball.x+ball.r>W) ball.vx*=-1;
+        if(ball.y-ball.r<0) ball.vy*=-1;
+        if(ball.y+ball.r>pad.y&&ball.y+ball.r<pad.y+18&&ball.x>pad.x&&ball.x<pad.x+pad.w){
+            ball.vy=-Math.abs(ball.vy); ball.vx+=(ball.x-(pad.x+pad.w/2))*0.08;
+        }
+        if(ball.y>H){
+            clearInterval(loop); alive=false;
+            document.getElementById('bo-status').innerHTML=`<div class="status-msg status-lose">💔 游戏结束！得分: ${score}</div>`;
+            return;
+        }
+        let any=false;
+        bricks.forEach(b=>{
+            if(!b.alive)return;
+            if(ball.x+ball.r>b.x&&ball.x-ball.r<b.x+BW&&ball.y+ball.r>b.y&&ball.y-ball.r<b.y+BH){
+                b.alive=false;ball.vy*=-1;score+=10;
+                document.getElementById('bo-score').textContent=`得分: ${score} | 鼠标控制挡板`;
+            } else { any=true; }
+        });
+        if(!any){clearInterval(loop);alive=false;document.getElementById('bo-status').innerHTML=`<div class="status-msg status-win">🏆 通关！得分: ${score}</div>`;}
+        draw();
+    }
+
+    window.boStart = () => {
+        clearInterval(loop);
+        ball={x:W/2,y:H-60,vx:3,vy:-4,r:7};
+        pad={x:W/2-40,y:H-20,w:80};
+        score=0; alive=true;
+        bricks=[];
+        for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++)
+            bricks.push({x:c*(BW+4)+2,y:r*(BH+4)+30,alive:true,c:COLORS[r]});
+        document.getElementById('bo-score').textContent='得分: 0 | 鼠标控制挡板';
+        document.getElementById('bo-status').innerHTML='';
+        draw(); loop=setInterval(tick,16);
+    };
+
+    const mm = e => {
+        if(!alive)return;
+        const r=cv.getBoundingClientRect();
+        pad.x=Math.max(0,Math.min(W-pad.w,(e.clientX-r.left)-pad.w/2));
+    };
+
+    cv.addEventListener('mousemove',mm);
+
+    cx.fillStyle='#0a0a1a'; cx.fillRect(0,0,W,H);
+    cx.fillStyle='#3a3a6a'; cx.font='1rem sans-serif'; cx.textAlign='center';
+    cx.fillText('点击"开始"游戏',W/2,H/2);
+
+    return () => { clearInterval(loop); cv.removeEventListener('mousemove',mm); delete window.boStart; };
+}
+
+// ════════════════════════════════════════════════════════
+//  Game 10 – 扫雷
+// ════════════════════════════════════════════════════════
+function initMine(el) {
+    const R=9,C=9,M=10;
+    let grid,rev,flag,over,first;
+    const NUM_COLORS=['','#3b82f6','#22c55e','#ef4444','#7c3aed','#f59e0b','#06b6d4','#111','#555'];
+
+    function reset() {
+        grid=Array.from({length:R},()=>Array(C).fill(0));
+        rev =Array.from({length:R},()=>Array(C).fill(false));
+        flag=Array.from({length:R},()=>Array(C).fill(false));
+        over=false; first=true;
+        document.getElementById('mn-status').innerHTML='';
+        render();
+    }
+
+    function plantMines(er,ec){
+        let p=0;
+        while(p<M){const r=rand(0,R-1),c=rand(0,C-1);if((Math.abs(r-er)>1||Math.abs(c-ec)>1)&&grid[r][c]!==-1){grid[r][c]=-1;p++;}}
+        for(let r=0;r<R;r++)for(let c=0;c<C;c++)if(grid[r][c]!==-1){let n=0;for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){const nr=r+dr,nc=c+dc;if(nr>=0&&nr<R&&nc>=0&&nc<C&&grid[nr][nc]===-1)n++;}grid[r][c]=n;}
+    }
+
+    function flood(r,c){
+        if(r<0||r>=R||c<0||c>=C||rev[r][c]||flag[r][c])return;
+        rev[r][c]=true;
+        if(grid[r][c]===0)for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++)flood(r+dr,c+dc);
+    }
+
+    function render(){
+        const g=document.getElementById('mine-grid');
+        if(!g)return;
+        g.innerHTML='';
+        for(let r=0;r<R;r++)for(let c=0;c<C;c++){
+            const d=document.createElement('div');
+            d.className='mine-cell';
+            if(rev[r][c]){
+                d.classList.add('revealed');
+                if(grid[r][c]===-1){d.textContent='💣';d.classList.add('boom');}
+                else if(grid[r][c]>0){d.textContent=grid[r][c];d.style.color=NUM_COLORS[grid[r][c]];}
+            } else if(flag[r][c]){ d.textContent='🚩'; d.classList.add('flagged'); }
+            d.addEventListener('click',()=>{
+                if(over||rev[r][c]||flag[r][c])return;
+                if(first){first=false;plantMines(r,c);}
+                if(grid[r][c]===-1){
+                    over=true;
+                    for(let rr=0;rr<R;rr++)for(let cc=0;cc<C;cc++)if(grid[rr][cc]===-1)rev[rr][cc]=true;
+                    render(); document.getElementById('mn-status').innerHTML='<div class="status-msg status-lose">💥 踩雷了！</div>';
+                    return;
+                }
+                flood(r,c); render();
+                const safe=R*C-M, revealed=rev.flat().filter(Boolean).length;
+                if(revealed===safe){over=true;document.getElementById('mn-status').innerHTML='<div class="status-msg status-win">🎉 成功排雷！</div>';}
+            });
+            d.addEventListener('contextmenu',e=>{e.preventDefault();if(over||rev[r][c])return;flag[r][c]=!flag[r][c];render();});
+            g.appendChild(d);
+        }
+    }
+
+    el.innerHTML=`
+        <h2 class="game-title">💣 扫雷</h2>
+        <p class="sub-title">左键揭开，右键插旗 &nbsp;|&nbsp; 9×9，10 颗雷</p>
+        <div id="mine-grid"></div>
+        <div id="mn-status"></div>
+        <div style="text-align:center;margin-top:.5rem">
+            <button class="btn btn-secondary" onclick="mnReset()">重置</button>
+        </div>
+    `;
+
+    window.mnReset = reset;
+    reset();
+    return () => { delete window.mnReset; };
+}
+
+// ════════════════════════════════════════════════════════
+//  Utilities
+// ════════════════════════════════════════════════════════
+function rand(a, b)  { return Math.floor(Math.random() * (b - a + 1)) + a; }
+function shuffle(a)  { for(let i=a.length-1;i>0;i--){const j=rand(0,i);[a[i],a[j]]=[a[j],a[i]];}return a; }
+function delay(ms)   { return new Promise(r => setTimeout(r, ms)); }
+
+// ════════════════════════════════════════════════════════
+//  Boot
+// ════════════════════════════════════════════════════════
+renderGrid();
+</script>
+</body>
+</html>

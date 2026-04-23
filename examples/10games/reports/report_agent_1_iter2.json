@@ -1,0 +1,72 @@
+{
+  "agent": "agent_1",
+  "role": "功能测试员",
+  "passed": false,
+  "issues": [
+    {
+      "game": "数学闪题",
+      "description": "Enter 键监听器绕过 btn.disabled 防重复提交保护。maSubmit() 在答题后将 ma-btn 置为 disabled，并设 550ms 后恢复并调用 next()。但 Enter 键通过 input 的 keydown 事件直接调用 window.maSubmit()，该函数仅检查 isNaN(v) 而不检查按钮禁用状态。在 550ms 等待期内，input 仍保留旧答案值（next() 尚未运行），再次按 Enter 会以相同值重复执行 maSubmit()：若答案正确则 score 被二次累加，且会再次排队一个 setTimeout(next, 550)，导致连续跳过两道题并产生多余的 next() 调用链，最终出现题目计数错乱（q 可能超过 10 而循环进入 showEnd 后又被重置调用）。",
+      "severity": "high",
+      "reproduce": "1. 打开数学闪题游戏；2. 输入正确答案后立即（在 550ms 内）连按两次 Enter 键；3. 观察得分被双重计算，题目进度跳过一题，或出现题目序号混乱现象。"
+    },
+    {
+      "game": "贪吃蛇",
+      "description": "反向键保护逻辑比较的是 dir（当前帧实际方向）而非 nd（下一帧待生效方向）。在同一帧间隔（140ms）内若玩家连按两个互为相反的方向键，第二次按键判断时 dir 尚未更新（tick 未执行），导致两个相反方向均能通过检测并以最后一次为准覆盖 nd。结果：若 nd 先被设为 A 方向，紧接着又被设为 A 的反方向 B（而 B 不是 dir 的反方向），下一帧 snake 将以 B 方向运动，实际上反转了 nd 的方向，当蛇体恰好位于反转路径时会发生自我碰撞导致不应死亡的 game over。",
+      "severity": "medium",
+      "reproduce": "1. 打开贪吃蛇游戏并开始；2. 等待蛇向右运动且身体较长时，在同一帧（140ms 内）先按方向键 Up 再立刻按 Down；3. nd 最终被设为 Down（两者均未被 dir=Right 拦截），蛇直接向下转向，若此时蛇尾紧随头部下方则触发碰撞死亡。"
+    }
+  ],
+  "fixed_verification": [
+    {
+      "game": "弹球打砖",
+      "fix": "砖块碰撞检测加入 ball.r",
+      "status": "已正确修复",
+      "detail": "第 957 行碰撞条件已改为 ball.x+ball.r>b.x && ball.x-ball.r<b.x+BW && ball.y+ball.r>b.y && ball.y-ball.r<b.y+BH，正确使用球半径进行 AABB 检测。"
+    },
+    {
+      "game": "弹球打砖",
+      "fix": "胜利判断延迟一帧",
+      "status": "已正确修复",
+      "detail": "any 初始为 false，仅在 alive=true 且未被命中的砖块处设 any=true（else 分支）；最后一块砖被命中时 else 不执行，同帧 !any 为 true 即触发胜利，无延迟。"
+    },
+    {
+      "game": "颜色记忆",
+      "fix": "async play() 重入锁",
+      "status": "已正确修复",
+      "detail": "引入 cancelled 变量，play() 中每个 await 后均检查 if(cancelled) return；smStart() 重置时先设 cancelled=false，cleanup 函数设 cancelled=true，有效防止多个协程并发运行。"
+    },
+    {
+      "game": "井字棋",
+      "fix": "AI 竞态条件",
+      "status": "已正确修复",
+      "detail": "aiMove() 开头添加 if(over) return 守卫；tttReset() 调用 clearTimeout(aiTimer) 清除待执行定时器；cleanup 函数同样 clearTimeout(aiTimer)，完整消除了竞态场景。"
+    }
+  ],
+  "checked_games": [
+    {
+      "game": "猜数字",
+      "check": "parseInt 处理（空值/小数/范围外）",
+      "status": "正常",
+      "detail": "空字符串 parseInt 返回 NaN，!NaN=true 触发错误提示；小数如 '1.7' 被 parseInt 截断为 1（合法范围内正确接受）；0 因 !0=true 被拦截；范围外整数由 v<1||v>100 拦截。逻辑无漏洞。"
+    },
+    {
+      "game": "记忆翻牌",
+      "check": "locked 机制在 850ms 内防住第三次点击",
+      "status": "正常",
+      "detail": "第二张牌翻开后立即 locked=true（第 551 行），flip() 入口检查 if(locked||...) return；850ms 定时器到期才 locked=false。第三次点击在 850ms 内被完整拦截，无漏洞。"
+    },
+    {
+      "game": "打地鼠",
+      "check": "mlStart() 是否先 clearInterval 再开新计时",
+      "status": "正常",
+      "detail": "第 618 行 clearInterval(gi); clearInterval(mi) 在第 619/627 行新 setInterval 之前执行，不会产生多重计时器叠加。"
+    },
+    {
+      "game": "反应速度",
+      "check": "5轮完成后再点是否正常重置",
+      "status": "正常",
+      "detail": "5 轮完成后 state='idle'; results=[] 被正确设置（第 676 行）；再次点击进入 idle 分支（第 664 行）重新初始化 results=[] 并启动新一轮，逻辑正确。"
+    }
+  ],
+  "summary": "本轮审查确认上一轮 4 处修复均正确有效（弹球打砖碰撞/胜利、颜色记忆重入、井字棋竞态）。在其余 6 款游戏中发现 2 处新问题：①数学闪题的 Enter 键监听直接绕过 btn.disabled 防护，可在 550ms 等待期内重复提交答案导致计分和题目跳转错乱（high）；②贪吃蛇反向保护使用 dir 而非 nd 做比较，在同一 tick 内快速连按两个互反方向键时 nd 可被设置为当前 nd 的反方向，造成非预期的 180° 转向死亡（medium）。猜数字、记忆翻牌、打地鼠、反应速度逻辑均通过审查，无功能缺陷。"
+}

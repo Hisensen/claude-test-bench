@@ -1,0 +1,68 @@
+{
+  "agent": "agent_3",
+  "role": "新手用户",
+  "passed": false,
+  "issues": [
+    {
+      "game": "记忆翻牌",
+      "description": "修复已确认：sub-title「点击翻开卡牌，找出 8 对相同的图案」已存在于代码中（第565行）。",
+      "severity": "resolved",
+      "suggestion": "无需额外修改。"
+    },
+    {
+      "game": "颜色记忆",
+      "description": "修复已确认：sub-title「观察颜色按钮的闪烁顺序，然后按相同顺序点击」已存在于代码中（第766行）。",
+      "severity": "resolved",
+      "suggestion": "无需额外修改。"
+    },
+    {
+      "game": "井字棋",
+      "description": "修复已确认：sub-title「你是 X，AI 是 O，点格子落子，三连成线获胜」已存在于代码中（第492行）。",
+      "severity": "resolved",
+      "suggestion": "无需额外修改。"
+    },
+    {
+      "game": "关闭按钮",
+      "description": "修复已确认：关闭按钮颜色已从 #aaa 改为 #ddd（第111行），更明显。",
+      "severity": "resolved",
+      "suggestion": "无需额外修改。"
+    },
+    {
+      "game": "打地鼠",
+      "description": "打地鼠没有任何 sub-title 或操作提示文字，新手打开面板后只看到分数行和地鼠格子，不知道需要先点击「开始游戏」按钮才能让地鼠出现。按钮在格子下方，容易被忽略。",
+      "severity": "medium",
+      "suggestion": "在 initMole 的 innerHTML 中，score-row 下方添加一行 sub-title，例如：<p class=\"sub-title\">点击「开始游戏」按钮开始，30 秒内点击出现的地鼠得分</p>"
+    },
+    {
+      "game": "贪吃蛇",
+      "description": "方向键说明仍然存在：sub-title 元素（id=\"sn-score\"）文本为「得分: 0 | 方向键 / WASD 控制」（第852行），确认保留。",
+      "severity": "resolved",
+      "suggestion": "无需额外修改。"
+    },
+    {
+      "game": "弹球打砖",
+      "description": "鼠标控制说明仍然存在：sub-title 元素（id=\"bo-score\"）文本为「得分: 0 | 鼠标控制挡板」（第923行），确认保留。",
+      "severity": "resolved",
+      "suggestion": "无需额外修改。"
+    },
+    {
+      "game": "扫雷",
+      "description": "左键/右键说明仍然存在：sub-title 文本为「左键揭开，右键插旗 | 9×9，10 颗雷」（第1055行），确认保留。",
+      "severity": "resolved",
+      "suggestion": "无需额外修改。"
+    },
+    {
+      "game": "反应速度",
+      "description": "游戏结束后没有明显的「重新开始」按钮。5轮完成后界面显示结果文字，新手不知道需要再次点击那个方框来重新开始游戏，缺少引导提示。",
+      "severity": "low",
+      "suggestion": "在5轮结束后，在 rx-info 区域下方额外渲染一个「再玩一次」按钮，或在结果文字中明确说明「点击上方方框重新开始」。"
+    },
+    {
+      "game": "所有游戏",
+      "description": "其余8款游戏（猜数字、井字棋、记忆翻牌、打地鼠、数学闪题、颜色记忆、贪吃蛇、弹球打砖、扫雷）均存在重新开始/重置按钮，打地鼠的「再玩一次」按钮在游戏结束后会被重新启用，功能完整。",
+      "severity": "resolved",
+      "suggestion": "无需额外修改。"
+    }
+  ],
+  "summary": "本轮共验证7项修复点：记忆翻牌 sub-title、颜色记忆 sub-title、井字棋 sub-title、关闭按钮颜色、贪吃蛇方向键说明、弹球打砖鼠标说明、扫雷左右键说明，全部修复已确认存在于代码中。发现2个残留问题：①打地鼠缺少操作提示 sub-title，新手不知道需先点「开始游戏」（中等严重）；②反应速度游戏结束后没有明显重新开始按钮，新手体验不友好（低严重）。整体大幅改善，但因打地鼠缺失操作引导，整体判定为未完全通过（passed: false）。"
+}
