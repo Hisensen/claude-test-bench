@@ -3,3 +3,16 @@ __pycache__/
 *.pyc
 .DS_Store
 *.log
+
+# Tool/agent runtime dirs
+.playwright-mcp/
+.teamagent/
+.verify/
+.claude/
+
+# Auto-generated CLAUDE.md (TeamAgent injection)
+CLAUDE.md
+
+# Stray test screenshots from past runs
+agent*.png
+agent_*.png
