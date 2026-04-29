@@ -8,7 +8,8 @@ __pycache__/
 .playwright-mcp/
 .teamagent/
 .verify/
-.claude/
+.claude/cache/
+.claude/settings.local.json
 
 # Auto-generated CLAUDE.md (TeamAgent injection)
 CLAUDE.md
