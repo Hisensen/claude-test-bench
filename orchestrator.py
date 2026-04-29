@@ -25,9 +25,6 @@ PROJECT_URL    = f"http://localhost:{PROJECT_PORT}"
 # CLI 项目类型（走 pytest 路径，不派 AI Agent）
 CLI_TYPES = {"cli_tool", "cli", "python_cli", "script", "python_script", "python"}
 
-# 子 Agent 工具权限（Web 路径专用）
-SUBAGENT_TOOLS = "Read,Write,Bash,Edit,mcp__playwright__*"
-
 # ── 状态管理 ──────────────────────────────────────────────────────────
 _status_lock = threading.Lock()
 
@@ -203,7 +200,6 @@ def plan_project(task: str) -> dict:
         "description":  description,
         "how_to_run":   _how_to_run(project_type, files),
         "tech_stack":   _tech_stack(exts),
-        "agents":       _default_web_agents() if project_type not in CLI_TYPES else [],
     }
     (WORKSPACE / "plan.json").write_text(json.dumps(plan, ensure_ascii=False, indent=2))
     add_event(f"主CC：项目类型 → {project_type}")
@@ -221,16 +217,6 @@ def _tech_stack(exts: set) -> str:
     if ".html" in exts: parts.append("HTML/CSS/JS")
     if ".js"   in exts and ".html" not in exts: parts.append("Node.js")
     return ", ".join(parts) or "未知"
-
-def _default_web_agents() -> list:
-    return [
-        {"id": 1, "role": "功能测试员",  "icon": "🔍",
-         "focus": "核心功能逻辑", "approach": "真实交互操作"},
-        {"id": 2, "role": "UI 测试员",   "icon": "🎨",
-         "focus": "视觉与交互体验", "approach": "Playwright 截图对比"},
-        {"id": 3, "role": "破坏性测试员","icon": "💥",
-         "focus": "边界与异常", "approach": "极端输入+竞态"},
-    ]
 
 def analyze_and_generate(task: str) -> dict:
     patch_status(status="generating")
@@ -364,231 +350,320 @@ def _parse_pytest_failures(output: str) -> list:
     return issues[:20]
 
 # ══════════════════════════════════════════════════════════════════════
-# Web 路径：多 Agent（模板简报，无独立简报调用）
+# Web 路径 v2：脚本化测试（特征清点 + 矩阵 + DOM 探测 + 自动 spec + 自愈）
 # ══════════════════════════════════════════════════════════════════════
 
-# 各角色简报模板（省去简报生成的 AI 调用）
-_WEB_BRIEF_TEMPLATES = {
-    "功能测试员": "验证所有核心功能在正常输入下工作正确。测试每个按钮/交互/计算结果。",
-    "UI 测试员":  "检查视觉布局、响应式、动画、颜色对比度、文字可读性。截图记录视觉问题。",
-    "破坏性测试员": "输入极端/非法值，快速点击，多次操作，尝试触发崩溃或异常状态。",
-}
+def extract_features(html_path: Path) -> dict:
+    """阶段 D：让 AI 清点项目里的所有可测特征，输出 features.json"""
+    add_event("阶段 D：清点项目特征（按钮/状态/按键）…")
+    html = html_path.read_text(encoding="utf-8")[:12000]
+    prompt = f"""阅读以下 HTML 项目，机械式清点所有可测特征，直接输出 JSON（不要 markdown 代码块、不要解释）。
 
-def _make_web_brief(agent: dict, plan: dict) -> str:
-    role     = agent["role"]
-    focus    = agent.get("focus", _WEB_BRIEF_TEMPLATES.get(role, agent.get("approach", "")))
-    template = _WEB_BRIEF_TEMPLATES.get(role, focus)
-    report_path = REPORTS_DIR / f"report_{agent['id']}_iter__ITER__.json"
+```html
+{html}
+```
 
-    return f"""# 测试简报：{role}（Agent #{agent['id']}）
+JSON schema:
+{{
+  "buttons":     [{{"id_or_text": "选择器/可见文字", "purpose": "用途简述"}}],
+  "inputs":      [{{"id_or_label": "选择器/标签", "type": "text/number/etc"}}],
+  "key_handlers":[{{"key": "ArrowUp/Enter/etc", "action": "做什么"}}],
+  "states":      [{{"name": "menu/play/end", "trigger": "如何进入"}}],
+  "canvas":      true/false,
+  "external_state_var": "如 window.gameState 或 null（仅 canvas 项目用）",
+  "console_check": true
+}}
 
-## 角色定位
-你是 {role}，负责从「{focus}」角度测试以下项目。
-{template}
+注意：宁可漏写，不可瞎编。只列代码里**实际存在**的元素和事件。"""
+    output = call_claude(prompt, tools="", timeout=120)
+    feats = extract_json(output) or {"buttons": [], "inputs": [], "key_handlers": [],
+                                      "states": [], "canvas": False, "external_state_var": None,
+                                      "console_check": True}
+    (WORKSPACE / "features.json").write_text(json.dumps(feats, ensure_ascii=False, indent=2))
+    n_btn = len(feats.get("buttons", []))
+    n_key = len(feats.get("key_handlers", []))
+    n_state = len(feats.get("states", []))
+    add_event(f"阶段 D：清点完成 → {n_btn} 按钮, {n_key} 按键, {n_state} 状态")
+    return feats
 
-## 项目信息
-- URL：{PROJECT_URL}
-- 目录：{PROJECT_DIR}
-- 运行方式：{plan.get('how_to_run', '')}
+def expand_matrix(feats: dict) -> list:
+    """阶段 E.1：把特征机械展开成测试用例矩阵（纯代码，零 AI）"""
+    cases = []
+    cases.append({"id": "load",   "kind": "smoke",  "desc": "页面能正常加载，无 JS 报错"})
+    cases.append({"id": "title",  "kind": "smoke",  "desc": "<title> 标签存在且非空"})
+    cases.append({"id": "no_console_error", "kind": "smoke", "desc": "控制台无 error 级别消息"})
 
-## 测试清单（逐项完成）
-1. 打开页面，截图确认加载正常
-2. 测试所有主要交互（按钮、输入框、菜单等）
-3. 验证核心功能的输出结果正确
-4. 检查控制台是否有报错
-5. 测试边界情况（空输入、极大值、特殊字符）
-6. 检查页面在不同操作后的状态一致性
-7. 验证错误提示是否友好
-8. 额外关注：{focus}
+    for i, b in enumerate(feats.get("buttons", [])):
+        sel = b.get("id_or_text", "")
+        cases.append({"id": f"btn_visible_{i}", "kind": "ui",
+                      "desc": f"按钮「{sel}」可见可点击", "selector": sel})
+        cases.append({"id": f"btn_click_{i}", "kind": "interaction",
+                      "desc": f"点击按钮「{sel}」不引发异常", "selector": sel})
 
-## 可用 Playwright 工具
-- browser_navigate → 打开 {PROJECT_URL}
-- browser_snapshot → 获取页面 DOM 结构
-- browser_click / browser_type / browser_press_key → 真实交互
-- browser_take_screenshot → 截图存证
-- browser_console_messages → 看控制台报错
-- browser_evaluate → 执行 JS
+    for i, inp in enumerate(feats.get("inputs", [])):
+        sel = inp.get("id_or_label", "")
+        cases.append({"id": f"input_accept_{i}", "kind": "interaction",
+                      "desc": f"输入框「{sel}」接受输入", "selector": sel,
+                      "input_type": inp.get("type", "text")})
 
-## 实时状态
-每完成一项，写入 {WORKSPACE}/agent_{agent['id']}_live.json：
-{{"action": "当前操作描述", "issues_count": N}}
+    for i, k in enumerate(feats.get("key_handlers", [])):
+        cases.append({"id": f"key_{i}", "kind": "interaction",
+                      "desc": f"按键「{k.get('key')}」触发反应不报错", "key": k.get("key")})
 
-## 最终报告（必须完成）
-测试完毕后将以下 JSON 写入报告文件（路径见运行时注入）：
-{{"agent":{agent['id']},"role":"{role}","passed":true/false,"issues":[{{"description":"","severity":"high/medium/low","location":"","fix_hint":""}}],"summary":""}}
-"""
+    for i, s in enumerate(feats.get("states", [])):
+        cases.append({"id": f"state_{i}", "kind": "flow",
+                      "desc": f"能进入状态「{s.get('name')}」", "trigger": s.get("trigger", "")})
 
-def run_agent(agent: dict, plan: dict, iteration: int) -> dict:
-    report_path = REPORTS_DIR / f"report_{agent['id']}_iter{iteration}.json"
-    status_path = WORKSPACE   / f"agent_{agent['id']}_live.json"
+    for w, h in [(375, 667), (768, 1024), (1280, 720)]:
+        cases.append({"id": f"viewport_{w}x{h}", "kind": "responsive",
+                      "desc": f"视口 {w}x{h} 下页面可见", "viewport": [w, h]})
+    return cases
 
-    for p in [report_path, status_path]:
-        if p.exists():
-            p.unlink()
-
-    brief = _make_web_brief(agent, plan)
-    runtime_note = f"""
----
-## 运行时（第 {iteration} 轮）
-- 报告路径：`{report_path}`
-- 实时状态：`{status_path}`
-
-⚠️ 测试结束前必须将完整报告 JSON 写入报告路径，否则本轮作废。
-"""
-    patch_agent(agent["id"], status="running", action="启动中…", issues_count=0)
-    add_event(f"[Agent {agent['id']} · {agent['role']}] 开始测试")
-
-    done_event = threading.Event()
-    def _invoke():
-        call_claude(brief + runtime_note, tools=SUBAGENT_TOOLS, timeout=600)
-        done_event.set()
-
-    threading.Thread(target=_invoke, daemon=True).start()
-    while not done_event.wait(timeout=1.5):
-        if status_path.exists():
-            try:
-                s = json.loads(status_path.read_text())
-                patch_agent(agent["id"],
-                            action=s.get("action", "…"),
-                            issues_count=s.get("issues_count", 0))
-            except Exception:
-                pass
-
-    report = _parse_report(report_path, agent)
-    passed = report.get("passed", False)
-    issues = report.get("issues", [])
-    patch_agent(agent["id"],
-                status="passed" if passed else "failed",
-                action="✅ 全部通过" if passed else f"❌ 发现 {len(issues)} 个问题",
-                issues_count=len(issues), passed=passed,
-                issues=issues, summary=report.get("summary", ""))
-    add_event(
-        f"[Agent {agent['id']}] {'通过' if passed else f'发现 {len(issues)} 个问题'}",
-        "success" if passed else "error",
-    )
-    return report
-
-def _parse_report(path: Path, agent: dict) -> dict:
-    if path.exists():
-        raw = path.read_text(encoding="utf-8").strip()
-        for pattern in [
-            lambda t: json.loads(t),
-            lambda t: json.loads(re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', t).group(1)),
-            lambda t: json.loads(re.search(r'\{[\s\S]*?"issues"[\s\S]*\}', t).group()),
-            lambda t: extract_json(t),
-        ]:
-            try:
-                data = pattern(raw)
-                if data:
-                    return data
-            except Exception:
-                pass
-
-    live_path = WORKSPACE / f"agent_{agent['id']}_live.json"
-    if live_path.exists():
-        try:
-            live = json.loads(live_path.read_text())
-            cnt  = live.get("issues_count", 0)
-            act  = live.get("action", "")
-            return {
-                "agent": agent["id"], "role": agent["role"],
-                "passed": cnt == 0 and "404" not in act and "失败" not in act,
-                "issues": ([{"description": f"最后动作: {act}", "severity": "medium",
-                             "location": "", "fix_hint": "Agent 未提交完整报告"}] if cnt > 0 else []),
-                "summary": f"报告未写入，最后动作：{act[:60]}",
+def probe_dom(project_url: str, feats: dict) -> dict:
+    """阶段 E.2：用 Python Playwright 程序化探测真实 DOM（零 AI）"""
+    from playwright.sync_api import sync_playwright
+    add_event("阶段 E：DOM 探测（程序化 Playwright）…")
+    snapshots = {}
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(project_url, wait_until="load", timeout=15000)
+            page.wait_for_timeout(800)
+            snapshots["initial"] = {
+                "title": page.title(),
+                "html_excerpt": page.content()[:3000],
+                "console_errors": [],
+                "buttons_in_dom": [b.inner_text()[:40] for b in page.query_selector_all("button")[:20]],
+                "inputs_in_dom":  [i.get_attribute("id") or i.get_attribute("name") or ""
+                                   for i in page.query_selector_all("input,textarea,select")[:20]],
             }
-        except Exception:
-            pass
+            browser.close()
+    except Exception as e:
+        snapshots["initial"] = {"error": str(e)[:200]}
+    (WORKSPACE / "dom_probes.json").write_text(json.dumps(snapshots, ensure_ascii=False, indent=2))
+    add_event(f"阶段 E：探测完成 → {len(snapshots.get('initial', {}).get('buttons_in_dom', []))} 个按钮")
+    return snapshots
 
-    return {"agent": agent["id"], "role": agent["role"],
-            "passed": False, "issues": [], "summary": "报告解析失败"}
+def generate_test_script(matrix: list, dom: dict, feats: dict, html_path: Path) -> Path:
+    """阶段 E.3：让 AI 把矩阵 + 真实 DOM 翻译成 pytest-playwright 脚本（一次 AI 调用）"""
+    add_event(f"阶段 E：生成测试脚本（{len(matrix)} 个用例）…")
+    test_path = PROJECT_DIR / "test_e2e.py"
+    html_excerpt = html_path.read_text(encoding="utf-8")[:5000]
+    prompt = f"""为以下 Web 项目写一个完整的 pytest-playwright 测试文件，写入路径：{test_path}
 
-def run_all_agents(agents: list, plan: dict, iteration: int) -> list:
-    reports, lock = [], threading.Lock()
-    def _run(ag):
-        r = run_agent(ag, plan, iteration)
-        with lock: reports.append(r)
-    threads = [threading.Thread(target=_run, args=(a,)) for a in agents]
-    for t in threads: t.start()
-    for t in threads: t.join()
-    return reports
+## 项目 HTML（前 5000 字符）
+```html
+{html_excerpt}
+```
 
-def fix_web_issues(reports: list, plan: dict, iteration: int) -> bool:
-    all_issues = [
-        {"from_agent": r.get("role", r.get("agent")), **iss}
-        for r in reports if not r.get("passed")
-        for iss in r.get("issues", [])
-    ]
-    if not all_issues:
+## 真实 DOM 探测（实际页面长这样）
+```json
+{json.dumps(dom, ensure_ascii=False, indent=2)[:2000]}
+```
+
+## 项目特征
+```json
+{json.dumps(feats, ensure_ascii=False, indent=2)[:2000]}
+```
+
+## 测试用例矩阵（每条转成一个 pytest 测试函数）
+```json
+{json.dumps(matrix, ensure_ascii=False, indent=2)[:4000]}
+```
+
+## 硬性要求
+1. 文件第一行必须是：`from playwright.sync_api import Page, expect`
+2. 项目 URL：`{PROJECT_URL}`
+3. 用 pytest-playwright 的 `page` fixture
+4. 每个测试函数命名为 `test_{{matrix_id}}`
+5. 失败时给出**简短**断言信息，不要长堆栈
+6. 不抓不可恢复异常；让 pytest 捕获就行
+7. canvas 项目用 `page.evaluate()` 读取 `window.{feats.get("external_state_var") or "<state-var>"}` 检查内部状态
+8. 控制台错误检查用 `page.on("console", lambda m: ...)` 收集
+9. 只输出 Python 代码，不要 markdown 代码块、不要解释
+10. 直接 Write 到 {test_path}
+
+写完后输出一行：TEST_GENERATED"""
+    call_claude(prompt, tools="Write", timeout=240)
+    if not test_path.exists():
+        add_event("阶段 E：测试脚本未生成 ❌", "error")
+        return None
+    add_event(f"阶段 E：测试脚本生成完成 ({test_path.stat().st_size} 字节)")
+    return test_path
+
+def run_test_script(test_path: Path) -> dict:
+    """阶段 E.4：跑 pytest，解析结果（零 AI）"""
+    add_event("阶段 E：运行 pytest-playwright…")
+    result = subprocess.run(
+        ["python", "-m", "pytest", str(test_path), "-v", "--tb=short", "--no-header",
+         "-x" if False else "--maxfail=999",  # 不要 fail-fast，全部跑完
+         "--browser=chromium"],
+        capture_output=True, text=True, cwd=str(PROJECT_DIR), timeout=600,
+    )
+    output = result.stdout + result.stderr
+    passed_n = int(m.group(1)) if (m := re.search(r'(\d+) passed', output)) else 0
+    failed_n = int(m.group(1)) if (m := re.search(r'(\d+) failed', output)) else 0
+    error_n  = int(m.group(1)) if (m := re.search(r'(\d+) error',  output)) else 0
+    failures = []
+    for blk in re.split(r'_{10,}|={10,}', output):
+        m = re.search(r'(FAILED|ERROR) (\S+)', blk)
+        if m:
+            err = re.search(r'(AssertionError|TimeoutError|\w+Error)[^\n]*', blk)
+            failures.append({
+                "test_id": m.group(2).split("::")[-1],
+                "kind": m.group(1),
+                "error": (err.group(0) if err else blk[:200])[:300],
+            })
+    return {
+        "passed": passed_n, "failed": failed_n, "error": error_n,
+        "all_passed": result.returncode == 0,
+        "failures": failures, "raw_output": output[-5000:],
+    }
+
+def categorize_failure(f: dict) -> str:
+    """失败分类：F1 选择器/时序错 | F2 真 bug | F3 环境错 | F4 未知"""
+    err = f.get("error", "").lower()
+    if any(k in err for k in ["element not found", "no element", "timeout waiting",
+                              "selector", "is not visible", "is not attached"]):
+        return "F1_selector"
+    if "connection refused" in err or "module not found" in err or "import" in err:
+        return "F3_env"
+    if "assertionerror" in err or "expect" in err:
+        return "F2_bug"
+    return "F4_unknown"
+
+def fix_with_rollback(failures: list, test_path: Path, html_path: Path,
+                     iteration: int, pre_fix_passed: int) -> bool:
+    """阶段 F：分类驱动的自愈循环 + git regression 防护"""
+    if not failures:
         return True
+    classes = {}
+    for f in failures:
+        classes.setdefault(categorize_failure(f), []).append(f)
 
-    add_event(f"主CC：汇总 {len(all_issues)} 个问题，开始修复…", "fix")
-    patch_status(status="fixing")
+    # F3 环境错优先：通常无解，跳过
+    if "F3_env" in classes:
+        add_event(f"阶段 F：{len(classes['F3_env'])} 个环境错误，跳过修复", "warn")
 
-    # 读取当前项目文件内容嵌入提示词
-    html_files = list(PROJECT_DIR.glob("*.html"))
-    code = ""
-    if html_files:
-        code = f"\n当前 index.html（前 4000 字符）：\n{html_files[0].read_text()[:4000]}"
+    # F1 改 spec, F2 改项目代码
+    f1, f2 = classes.get("F1_selector", []) + classes.get("F4_unknown", []), classes.get("F2_bug", [])
 
-    prompt = f"""修复以下 Web 项目中的 Bug。
+    # ── 修脚本（F1）──
+    if f1:
+        add_event(f"阶段 F：修脚本（{len(f1)} 个选择器/时序错）…", "fix")
+        prompt = f"""修复 pytest-playwright 测试脚本中的失败用例。**只改测试文件**，不要改项目代码。
 
-项目目录：{PROJECT_DIR}{code}
+测试文件：{test_path}
 
-需要修复的问题：
-{json.dumps(all_issues, ensure_ascii=False, indent=2)}
+```python
+{test_path.read_text(encoding='utf-8')[:6000]}
+```
 
-要求：直接修改 {PROJECT_DIR} 中的文件，修复全部问题，不要删除正常功能。"""
+失败用例（选择器或时序问题）：
+{json.dumps(f1, ensure_ascii=False, indent=2)[:3000]}
 
-    call_claude(prompt, tools="Read,Write,Edit,Bash", timeout=300)
-    add_event(f"主CC：第 {iteration} 轮修复完成", "fix")
-    patch_status(status="testing")
+把 {test_path} 里失败的 test 函数定向修好（调整选择器、加 wait_for、改 timeout）。其它通过的 test 不要动。
+只输出"DONE"。"""
+        call_claude(prompt, tools="Read,Write,Edit", timeout=240)
+
+    # ── 修代码（F2，带 git rollback）──
+    if f2:
+        add_event(f"阶段 F：修项目代码（{len(f2)} 个 assertion 失败）…", "fix")
+        # 备份当前项目状态
+        snapshot_dir = WORKSPACE / f".snapshot_iter{iteration}"
+        if snapshot_dir.exists():
+            shutil.rmtree(snapshot_dir)
+        shutil.copytree(PROJECT_DIR, snapshot_dir)
+        prompt = f"""修复 Web 项目中的 bug，使 pytest 通过。**只改项目代码**，不要改 test_e2e.py。
+
+项目 HTML（{html_path.name}）：
+```html
+{html_path.read_text(encoding='utf-8')[:6000]}
+```
+
+失败的断言：
+{json.dumps(f2, ensure_ascii=False, indent=2)[:3000]}
+
+直接修改 {html_path}，使断言通过。不要删除正常功能。"""
+        call_claude(prompt, tools="Read,Write,Edit", timeout=300)
+
+        # 跑全量回归
+        add_event("阶段 F：跑全量回归检查…")
+        new_results = run_test_script(test_path)
+        if new_results["passed"] < pre_fix_passed:
+            # 越修越差，回滚
+            add_event(f"⚠️ 修复后通过数下降 ({pre_fix_passed} → {new_results['passed']})，回滚", "warn")
+            shutil.rmtree(PROJECT_DIR)
+            shutil.copytree(snapshot_dir, PROJECT_DIR)
+        shutil.rmtree(snapshot_dir, ignore_errors=True)
     return False
 
 def run_web_loop(plan: dict, max_iter: int) -> bool:
-    """Web 项目：多 Agent 并行测试 + 主 CC 修复循环。"""
+    """Web v2 主循环：清点 → 矩阵 → 探测 → 生成 spec → 跑 → 修复"""
     start_project_server()
+    html_files = list(PROJECT_DIR.glob("*.html"))
+    if not html_files:
+        add_event("❌ 找不到 HTML 文件", "error")
+        return False
+    html_path = html_files[0]
 
+    # Dashboard 用一个虚拟 Agent 卡片显示状态
     patch_status(
         project_type=plan["project_type"],
         agents=[{
-            "id": a["id"], "role": a["role"], "icon": a.get("icon", "🤖"),
-            "focus": a.get("focus", ""), "status": "waiting",
+            "id": 1, "role": "Web 自动测试", "icon": "🌐",
+            "focus": "脚本化端到端测试", "status": "waiting",
             "action": "准备中…", "issues_count": 0,
             "passed": None, "issues": [], "summary": "",
-        } for a in plan["agents"]],
+        }],
     )
-    add_event("主CC：开始 Web 多 Agent 测试（使用模板简报）")
+    add_event("阶段 D-E 启动：脚本化 Web 测试")
+    patch_agent(1, status="running", action="清点项目特征…")
+
+    feats = extract_features(html_path)
+    matrix = expand_matrix(feats)
+    add_event(f"阶段 E.1：矩阵展开 → {len(matrix)} 个测试用例")
+    dom = probe_dom(PROJECT_URL, feats)
+    test_path = generate_test_script(matrix, dom, feats, html_path)
+    if not test_path:
+        patch_agent(1, status="failed", action="❌ 测试脚本生成失败", passed=False)
+        return False
 
     all_passed = False
     for iteration in range(1, max_iter + 1):
         patch_status(iteration=iteration, status="testing")
-        add_event(f"━━━ 第 {iteration}/{max_iter} 轮测试 ━━━")
+        patch_agent(1, status="running", action=f"运行 pytest（第 {iteration} 轮）…")
+        add_event(f"━━━ 第 {iteration}/{max_iter} 轮 pytest ━━━")
+        results = run_test_script(test_path)
+        (REPORTS_DIR / f"web_iter{iteration}.json").write_text(
+            json.dumps(results, ensure_ascii=False, indent=2))
+        total_bad = results["failed"] + results["error"]
 
-        s = read_status()
-        for a in s["agents"]:
-            a.update({"status": "waiting", "action": "准备中…", "passed": None})
-        _write_raw(s)
-
-        reports = run_all_agents(plan["agents"], plan, iteration)
-
-        n_passed = sum(1 for r in reports if r.get("passed"))
-        n_total  = len(reports)
-        add_event(f"第 {iteration} 轮：{n_passed}/{n_total} 通过",
-                  "success" if n_passed == n_total else "warn")
-
-        if n_passed == n_total:
+        if results["all_passed"]:
+            patch_agent(1, status="passed", passed=True,
+                        action=f"✅ {results['passed']} 个测试全部通过",
+                        summary=f"{results['passed']} 通过")
+            add_event(f"🎉 Web pytest：{results['passed']} 个测试全部通过", "success")
             all_passed = True
             break
 
-        if iteration < max_iter:
-            done = fix_web_issues(reports, plan, iteration)
-            if done:
-                all_passed = True
-                break
-        else:
-            add_event(f"已达最大迭代次数 ({max_iter})", "warn")
+        issues = [{"description": f["test_id"], "severity": "high",
+                   "location": "test_e2e.py", "fix_hint": f["error"][:120]}
+                  for f in results["failures"][:20]]
+        patch_agent(1, status="failed", passed=False,
+                    action=f"❌ {total_bad} 个失败",
+                    issues=issues, issues_count=total_bad,
+                    summary=f"{results['passed']} 通过，{total_bad} 失败")
+        add_event(f"Web pytest：{results['passed']} 通过，{total_bad} 失败", "error")
 
+        if iteration >= max_iter:
+            add_event(f"已达最大迭代次数 ({max_iter})", "warn")
+            break
+        patch_status(status="fixing")
+        fix_with_rollback(results["failures"], test_path, html_path,
+                          iteration, results["passed"])
+        patch_status(status="testing")
     return all_passed
 
 # ── 主流程 ────────────────────────────────────────────────────────────
